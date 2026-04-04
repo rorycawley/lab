@@ -1,0 +1,42 @@
+# values-prod.yaml — Hetzner via kube-hetzner
+#
+# ⚠️  BEFORE FIRST DEPLOY, change these two values:
+#   1. image.repository → ghcr.io/rorycawley/myapp
+#   2. ingress.host     → your-domain.com
+#
+# Image is pushed to GHCR by `bb docker-push` or GitHub Actions.
+# The tag is overridden at deploy time with --set image.tag=$SHA
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/rorycawley/myapp    # ← change this
+  tag: latest
+  pullPolicy: Always
+
+ingress:
+  enabled: true
+  className: traefik                              # kube-hetzner uses Traefik
+  host: myappk8s.net                           # ← change this (e.g. myappk8s.net)
+  tls: true
+  clusterIssuer: letsencrypt                      # cert-manager issuer
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# OTel disabled until LGTM monitoring stack is installed (bb monitoring-install).
+# The OTel Java agent adds ~10-15s to JVM startup and tries to connect to Alloy.
+# If Alloy isn't running, the agent retries in a loop and can cause probe failures.
+# Enable this AFTER running bb monitoring-install.
+otel:
+  enabled: "false"
+
+health:
+  path: /health
+  initialDelaySeconds: 45
+  periodSeconds: 10

@@ -1,0 +1,107 @@
+# Grafana — visualization (the G in LGTM)
+# Pre-configured with Loki, Tempo, and Mimir datasources.
+
+replicas: 1
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+# Admin credentials — change the password!
+adminUser: admin
+adminPassword: admin-change-me
+
+# ── Datasources (auto-configured) ───────────────────────────────
+datasources:
+  datasources.yaml:
+    apiVersion: 1
+    datasources:
+      # Mimir for metrics (Prometheus-compatible API)
+      - name: Mimir
+        type: prometheus
+        uid: mimir
+        url: http://mimir.monitoring.svc:9009/prometheus
+        isDefault: true
+        jsonData:
+          timeInterval: 15s
+
+      # Loki for logs
+      - name: Loki
+        type: loki
+        uid: loki
+        url: http://loki.monitoring.svc:3100
+        jsonData:
+          derivedFields:
+            # Click a traceID in logs → jump to Tempo trace
+            - name: TraceID
+              datasourceUid: tempo
+              matcherRegex: '"traceId":"(\w+)"'
+              url: "$${__value.raw}"
+
+      # Tempo for traces
+      - name: Tempo
+        type: tempo
+        uid: tempo
+        url: http://tempo.monitoring.svc:3100
+        jsonData:
+          tracesToLogsV2:
+            datasourceUid: loki
+            filterByTraceID: true
+          tracesToMetrics:
+            datasourceUid: mimir
+          nodeGraph:
+            enabled: true
+          serviceMap:
+            datasourceUid: mimir
+
+# ── Ingress ──────────────────────────────────────────────────────
+ingress:
+  enabled: true
+  ingressClassName: traefik
+  hosts:
+    - grafana.YOUR_DOMAIN.com           # ← change this (e.g. grafana.myappk8s.net)
+  tls:
+    - secretName: grafana-tls
+      hosts:
+        - grafana.YOUR_DOMAIN.com       # ← change this
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+
+# ── Dashboards ───────────────────────────────────────────────────
+dashboardProviders:
+  dashboardproviders.yaml:
+    apiVersion: 1
+    providers:
+      - name: default
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: false
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards/default
+
+dashboards:
+  default:
+    # JVM dashboard (for your Clojure app)
+    jvm-micrometer:
+      gnetId: 4701
+      revision: 23
+      datasource: Mimir
+    # Kubernetes cluster overview
+    k8s-cluster:
+      gnetId: 7249
+      revision: 1
+      datasource: Mimir
+    # Node exporter (host metrics)
+    node-exporter:
+      gnetId: 1860
+      revision: 37
+      datasource: Mimir
+
+persistence:
+  enabled: true
+  size: 2Gi

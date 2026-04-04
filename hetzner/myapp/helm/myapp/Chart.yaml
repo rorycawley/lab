@@ -1,0 +1,6 @@
+apiVersion: v2
+name: myapp
+description: Clojure ring/reitit microservice
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

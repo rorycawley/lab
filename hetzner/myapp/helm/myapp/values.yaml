@@ -1,0 +1,37 @@
+replicaCount: 1
+
+image:
+  repository: myapp
+  tag: dev
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 8080
+
+ingress:
+  enabled: false
+  className: ""
+  host: ""
+  tls: false
+  clusterIssuer: ""
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+env:
+  PORT: "8080"
+
+health:
+  path: /health
+  initialDelaySeconds: 45
+  periodSeconds: 10
+
+otel:
+  enabled: "false"
+  endpoint: "http://alloy.monitoring.svc:4318"

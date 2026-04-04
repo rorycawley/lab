@@ -1,0 +1,72 @@
+# Mimir — long-term metrics storage (the M in LGTM)
+# Monolithic mode: replaces Prometheus for storage.
+# Alloy scrapes metrics and remote-writes to Mimir.
+
+deploymentMode: monolithic
+
+mimir:
+  structuredConfig:
+    common:
+      storage:
+        backend: s3
+        s3:
+          endpoint: minio.monitoring.svc:9000
+          bucket_name: mimir-data
+          access_key_id: minio
+          secret_access_key: minio-secret-key-change-me
+          insecure: true
+
+    blocks_storage:
+      storage_prefix: blocks
+      tsdb:
+        dir: /data/tsdb
+
+    ruler_storage:
+      storage_prefix: ruler
+
+    limits:
+      native_histograms_ingestion_enabled: true
+
+multitenancy_enabled: false
+
+minio:
+  enabled: false
+
+monolithic:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 512Mi
+    limits:
+      memory: 1536Mi
+  persistentVolume:
+    enabled: true
+    size: 10Gi
+
+# Disable distributed components
+ingester:
+  replicas: 0
+distributor:
+  replicas: 0
+querier:
+  replicas: 0
+query_frontend:
+  replicas: 0
+store_gateway:
+  replicas: 0
+compactor:
+  replicas: 0
+
+# Disable nginx gateway (monolithic exposes API directly)
+gateway:
+  enabledNonEnterprise: false
+
+# Disable self-monitoring
+metaMonitoring:
+  dashboards:
+    enabled: false
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false

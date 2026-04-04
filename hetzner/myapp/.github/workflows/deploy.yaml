@@ -1,0 +1,96 @@
+name: Build & Deploy
+
+on:
+  push:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+  deploy:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Option A: Direct kubectl ────────────────────────────────
+      # Store your kubeconfig as a GitHub secret called KUBE_CONFIG
+      # (base64-encode it: base64 -w0 < clustername_kubeconfig.yaml)
+      - name: Set up kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install myapp ./helm/myapp \
+            -f ./helm/myapp/values-prod.yaml \
+            --set image.tag=${{ github.sha }}
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/myapp --timeout=120s
+
+      - name: Smoke test
+        run: |
+          # Get the ingress host from the Helm values
+          APP_HOST=$(kubectl get ingress myapp -o jsonpath='{.spec.rules[0].host}')
+          # Get the load balancer IP as fallback
+          LB_IP=$(kubectl get ingress myapp -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+          echo "Testing https://${APP_HOST}/health (via ${LB_IP})"
+
+          # Retry up to 5 times with 5s gaps (DNS + TLS can take a moment)
+          for i in 1 2 3 4 5; do
+            STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
+              --resolve "${APP_HOST}:443:${LB_IP}" \
+              --max-time 10 \
+              "https://${APP_HOST}/health" 2>/dev/null) || true
+
+            if [ "$STATUS" = "200" ]; then
+              echo "✓ Health check passed (attempt ${i})"
+              exit 0
+            fi
+            echo "Attempt ${i}: got HTTP ${STATUS:-timeout}, retrying in 5s..."
+            sleep 5
+          done
+
+          echo "✗ Health check failed after 5 attempts"
+          exit 1
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Rolling back to previous release..."
+          helm rollback myapp
+          echo "✗ Deploy failed — rolled back. Check logs with: bb k8s-logs"

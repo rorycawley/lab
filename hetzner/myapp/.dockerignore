@@ -1,0 +1,13 @@
+target/
+.cpcache/
+.git/
+.gitignore
+.nrepl-port
+dev/
+terraform/
+monitoring/
+helm/
+.github/
+*.md
+*.tar.gz
+*_kubeconfig.yaml

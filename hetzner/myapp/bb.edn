@@ -1,0 +1,199 @@
+{:tasks
+ {;; ── Development ───────────────────────────────────────────────────
+  dev
+  {:doc  "Start nREPL (connect your editor to port 7888)"
+   :task (shell "clj -M:dev -m nrepl.cmdline --middleware '[cider.nrepl/cider-middleware]' --port 7888")}
+
+  repl
+  {:doc  "Start a plain interactive REPL (no nREPL)"
+   :override-builtin true
+   :task (shell "clj -M:dev")}
+
+  test
+  {:doc  "Run tests"
+   :task (shell "clj -M:test")}
+
+  ;; ── Build ─────────────────────────────────────────────────────────
+  build
+  {:doc  "Build uberjar → target/app.jar"
+   :task (shell "clj -T:build uber")}
+
+  clean
+  {:doc  "Delete target/"
+   :task (shell "clj -T:build clean")}
+
+  ;; ── Docker ────────────────────────────────────────────────────────
+  docker-build
+  {:doc  "Build Docker image locally (native platform, for dev)"
+   :task (shell "docker build -t myapp:dev .")}
+
+  docker-run
+  {:doc  "Run Docker image locally (standalone, no K8s)"
+   :task (shell "docker run --rm -p 8080:8080 -e OTEL_JAVAAGENT_ENABLED=false myapp:dev")}
+
+  docker-push
+  {:doc  "Build for amd64 + push to GHCR (for Hetzner deployment)"
+   :task (let [user (-> (shell {:out :string} "gh api user -q .login") :out clojure.string/trim)
+               token (-> (shell {:out :string} "gh auth token") :out clojure.string/trim)
+               image (str "ghcr.io/" user "/myapp:latest")]
+           (shell {:in token} (str "docker login ghcr.io -u " user " --password-stdin"))
+           (shell (str "docker build --platform linux/amd64 -t " image " ."))
+           (shell (str "docker push " image))
+           (println (str "✓ Pushed " image)))}
+
+  ;; ── Local K8s (Rancher Desktop) ───────────────────────────────────
+  helm-local
+  {:doc  "Build, deploy to local K8s, wait, and smoke test"
+   :task (do (shell "docker build -t myapp:dev .")
+             (shell "helm upgrade --install myapp ./helm/myapp -f ./helm/myapp/values-local.yaml")
+             (shell "kubectl rollout status deployment/myapp --timeout=90s")
+             (run 'smoke-local))}
+
+  helm-uninstall
+  {:doc  "Remove from local K8s"
+   :task (shell "helm uninstall myapp")}
+
+  smoke-local
+  {:doc  "Smoke test the local K8s deployment"
+   :task (let [max-attempts 5]
+           (loop [i 1]
+             (let [{:keys [exit]}
+                   (shell {:continue true}
+                          "curl -sf -o /dev/null -w '%{http_code}' http://myapp.localhost/health")]
+               (if (zero? exit)
+                 (println (str "✓ Health check passed (attempt " i ")"))
+                 (if (< i max-attempts)
+                   (do (println (str "  Attempt " i " failed, retrying in 3s..."))
+                       (Thread/sleep 3000)
+                       (recur (inc i)))
+                   (do (println "✗ Health check failed. Try: bb k8s-describe")
+                       (System/exit 1)))))))}
+
+  ;; ── Helpers (internal, prefixed with -) ───────────────────────────
+  -prod-host
+  {:doc  "Read the ingress host from values-prod.yaml"
+   :task (let [host (or (System/getenv "PROD_HOST")
+                        (-> (shell {:out :string}
+                                   "grep 'host:' helm/myapp/values-prod.yaml | head -1 | sed 's/.*host: *//' | sed 's/ .*//'")
+                            :out
+                            clojure.string/trim))]
+           (if (or (clojure.string/includes? host "YOUR_")
+                   (clojure.string/blank? host))
+             (do (println "✗ Set your domain in helm/myapp/values-prod.yaml (ingress.host)")
+                 (println "  Or set PROD_HOST env var")
+                 (System/exit 1))
+             host))}
+
+  -check-prod-values
+  {:doc  "Verify values-prod.yaml has no unfilled placeholders"
+   :task (let [content (slurp "helm/myapp/values-prod.yaml")]
+           (when (clojure.string/includes? content "YOUR_GITHUB_USER")
+             (println "✗ Update helm/myapp/values-prod.yaml:")
+             (println "  Replace YOUR_GITHUB_USER with your GitHub username")
+             (println "  e.g. sed -i '' 's/YOUR_GITHUB_USER/yourusername/g' helm/myapp/values-prod.yaml")
+             (System/exit 1))
+           (when (clojure.string/includes? content "YOUR_DOMAIN")
+             (println "✗ Update helm/myapp/values-prod.yaml:")
+             (println "  Replace YOUR_DOMAIN.com with your domain")
+             (println "  e.g. sed -i '' 's/YOUR_DOMAIN.com/myappk8s.net/g' helm/myapp/values-prod.yaml")
+             (System/exit 1)))}
+
+  -tf-init
+  {:doc  "Run terraform init if .terraform is missing"
+   :task (let [tf-dir (clojure.java.io/file "terraform" ".terraform")]
+           (when-not (.exists tf-dir)
+             (println "Running terraform init...")
+             (shell {:dir "terraform"} "terraform init")))}
+
+  ;; ── Smoke tests ───────────────────────────────────────────────────
+  smoke-prod
+  {:doc  "Smoke test production (reads host from values-prod.yaml)"
+   :task (let [host (run '-prod-host)
+               max-attempts 5]
+           (loop [i 1]
+             (let [{:keys [exit]}
+                   (shell {:continue true}
+                          (str "curl -sf -o /dev/null -w '%{http_code}' https://" host "/health"))]
+               (if (zero? exit)
+                 (println (str "✓ " host "/health → 200"))
+                 (if (< i max-attempts)
+                   (do (println (str "  Attempt " i " failed, retrying in 5s..."))
+                       (Thread/sleep 5000)
+                       (recur (inc i)))
+                   (do (println (str "✗ " host "/health failed after " max-attempts " attempts"))
+                       (System/exit 1)))))))}
+
+  ;; ── K8s operations ────────────────────────────────────────────────
+  k8s-status
+  {:doc  "Show pod status"
+   :task (shell "kubectl get pods -l app.kubernetes.io/name=myapp")}
+
+  k8s-logs
+  {:doc  "Tail application logs"
+   :task (shell "kubectl logs -l app.kubernetes.io/name=myapp -f --tail=50")}
+
+  k8s-describe
+  {:doc  "Describe pods (useful for debugging startup issues)"
+   :task (shell "kubectl describe pods -l app.kubernetes.io/name=myapp")}
+
+  k8s-port-forward
+  {:doc  "Forward localhost:8080 → pod:8080 (bypass ingress)"
+   :task (shell "kubectl port-forward svc/myapp 8080:8080")}
+
+  k8s-shell
+  {:doc  "Open a shell in a running pod"
+   :task (shell "kubectl exec -it deploy/myapp -- sh")}
+
+  ;; ── Terraform ─────────────────────────────────────────────────────
+  tf-plan
+  {:doc  "Terraform plan for Hetzner cluster"
+   :depends [-tf-init]
+   :task (shell {:dir "terraform"} "terraform plan")}
+
+  tf-apply
+  {:doc  "Terraform apply (creates/updates Hetzner cluster)"
+   :depends [-tf-init]
+   :task (shell {:dir "terraform"} "terraform apply -auto-approve")}
+
+  tf-destroy
+  {:doc  "Destroy Hetzner cluster (stops billing)"
+   :depends [-tf-init]
+   :task (shell {:dir "terraform"} "terraform destroy -auto-approve")}
+
+  tf-kubeconfig
+  {:doc  "Regenerate kubeconfig from Terraform state"
+   :task (do (shell {:dir "terraform"} "bash -c 'terraform output --raw kubeconfig | tr -d \\r > ../myapp_kubeconfig.yaml'")
+             (println "✓ Written to myapp_kubeconfig.yaml")
+             (println "  Run: export KUBECONFIG=$(pwd)/myapp_kubeconfig.yaml"))}
+
+  ;; ── Production deploy ─────────────────────────────────────────────
+  helm-prod
+  {:doc  "Deploy to production, wait, and smoke test"
+   :depends [-check-prod-values]
+   :task (do (shell "helm upgrade --install myapp ./helm/myapp -f ./helm/myapp/values-prod.yaml")
+             (shell "kubectl rollout status deployment/myapp --timeout=180s")
+             (run 'smoke-prod))}
+
+  ;; ── Monitoring (LGTM stack) ─────────────────────────────────────
+  monitoring-install
+  {:doc  "Install full Grafana LGTM stack (MinIO + Loki + Tempo + Mimir + Alloy + Grafana)"
+   :task (shell "bash monitoring/install.sh")}
+
+  monitoring-status
+  {:doc  "Show all monitoring pods"
+   :task (shell "kubectl get pods -n monitoring")}
+
+  monitoring-uninstall
+  {:doc  "Remove entire LGTM stack"
+   :task (do (shell {:continue true} "helm uninstall grafana -n monitoring")
+             (shell {:continue true} "helm uninstall alloy   -n monitoring")
+             (shell {:continue true} "helm uninstall tempo   -n monitoring")
+             (shell {:continue true} "helm uninstall loki    -n monitoring")
+             (shell {:continue true} "helm uninstall mimir   -n monitoring")
+             (shell {:continue true} "helm uninstall minio   -n monitoring")
+             (println "LGTM stack removed."))}
+
+  grafana
+  {:doc  "Port-forward Grafana → http://localhost:3000"
+   :task (do (println "Grafana → http://localhost:3000  (admin / admin-change-me)")
+             (shell "kubectl port-forward -n monitoring svc/grafana 3000:80"))}}}

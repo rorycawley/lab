@@ -1,0 +1,61 @@
+target/
+.cpcache/
+.nrepl-port
+*.jar
+node_modules/
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate*
+terraform/.terraform.lock.hcl
+terraform/k3s_kustomization_backup.yaml
+terraform/hcloud-microos-snapshots.pkr.hcl
+terraform/packer_cache/
+
+# Kubeconfig (sensitive!)
+*_kubeconfig.yaml
+*_kubeconfig_clean.yaml
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.calva/
+
+# Clojure
+target/
+.cpcache/
+.nrepl-port
+*.jar
+
+# Terraform (sensitive — contains tokens and cluster state)
+terraform/.terraform/
+terraform/.terraform.lock.hcl
+terraform/*.tfstate
+terraform/*.tfstate.backup
+terraform/k3s_kubeconfig.yaml
+terraform/k3s_kustomization_backup.yaml
+
+# Packer (downloaded during setup, not needed in repo)
+terraform/hcloud-microos-snapshots.pkr.hcl
+terraform/packer_cache/
+
+# Kubeconfig (sensitive — cluster credentials)
+*_kubeconfig.yaml
+*_kubeconfig_clean.yaml
+
+# Tarballs
+*.tar.gz
+
+# IDE
+.idea/
+.vscode/
+*.iml
+.calva/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Node (in case any tools pull it in)
+node_modules/

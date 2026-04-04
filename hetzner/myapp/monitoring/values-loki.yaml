@@ -1,0 +1,66 @@
+# Loki — log aggregation (the L in LGTM)
+# Monolithic mode: single process, minimal resource footprint.
+# Stores log chunks in MinIO.
+
+deploymentMode: SingleBinary
+
+loki:
+  auth_enabled: false
+
+  storage:
+    type: s3
+    s3:
+      endpoint: minio.monitoring.svc:9000
+      bucketnames: loki-data
+      access_key_id: minio
+      secret_access_key: minio-secret-key-change-me
+      insecure: true
+      s3ForcePathStyle: true
+
+  commonConfig:
+    replication_factor: 1
+
+  schemaConfig:
+    configs:
+      - from: "2024-01-01"
+        store: tsdb
+        object_store: s3
+        schema: v13
+        index:
+          prefix: index_
+          period: 24h
+
+  limits_config:
+    retention_period: 168h          # 7 days
+
+singleBinary:
+  replicas: 1
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+# Disable components not needed in monolithic mode
+gateway:
+  enabled: false
+backend:
+  replicas: 0
+read:
+  replicas: 0
+write:
+  replicas: 0
+
+# Disable built-in minio (we run our own)
+minio:
+  enabled: false
+
+# Disable self-monitoring to save resources
+monitoring:
+  selfMonitoring:
+    enabled: false
+    grafanaAgent:
+      installOperator: false
+  lokiCanary:
+    enabled: false

@@ -1,0 +1,165 @@
+# Grafana Alloy — unified collection agent
+# Replaces Prometheus (scraping) + Promtail (logs) + OTel Collector (traces)
+# Runs as a DaemonSet so there's one per node.
+
+alloy:
+  configMap:
+    content: |
+      // ── Kubernetes discovery ─────────────────────────────────────
+      discovery.kubernetes "pods" {
+        role = "pod"
+      }
+
+      discovery.kubernetes "nodes" {
+        role = "node"
+      }
+
+      // ── METRICS: scrape pods with prometheus.io/scrape annotation ─
+      discovery.relabel "pods_metrics" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_scrape"]
+          regex         = "true"
+          action        = "keep"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_port"]
+          target_label  = "__address__"
+          regex         = "(\\d+)"
+          replacement   = "${1}"
+          action        = "replace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_ip", "__meta_kubernetes_pod_annotation_prometheus_io_port"]
+          separator     = ":"
+          target_label  = "__address__"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_annotation_prometheus_io_path"]
+          target_label  = "__metrics_path__"
+          regex         = "(.+)"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+      }
+
+      prometheus.scrape "pods" {
+        targets    = discovery.relabel.pods_metrics.output
+        forward_to = [prometheus.remote_write.mimir.receiver]
+      }
+
+      // ── METRICS: scrape kubelet/cadvisor for container metrics ────
+      discovery.relabel "kubelet" {
+        targets = discovery.kubernetes.nodes.targets
+
+        rule {
+          target_label  = "__address__"
+          replacement   = "kubernetes.default.svc:443"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_node_name"]
+          regex         = "(.+)"
+          target_label  = "__metrics_path__"
+          replacement   = "/api/v1/nodes/${1}/proxy/metrics/cadvisor"
+        }
+      }
+
+      prometheus.scrape "kubelet" {
+        targets    = discovery.relabel.kubelet.output
+        scheme     = "https"
+        forward_to = [prometheus.remote_write.mimir.receiver]
+
+        bearer_token_file = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+        tls_config {
+          ca_file              = "/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+          insecure_skip_verify = true
+        }
+      }
+
+      // ── METRICS: write to Mimir ──────────────────────────────────
+      prometheus.remote_write "mimir" {
+        endpoint {
+          url = "http://mimir.monitoring.svc:9009/api/v1/push"
+        }
+      }
+
+      // ── LOGS: collect from all pods ──────────────────────────────
+      discovery.relabel "pods_logs" {
+        targets = discovery.kubernetes.pods.targets
+
+        rule {
+          source_labels = ["__meta_kubernetes_namespace"]
+          target_label  = "namespace"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_name"]
+          target_label  = "pod"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_container_name"]
+          target_label  = "container"
+        }
+        rule {
+          source_labels = ["__meta_kubernetes_pod_label_app_kubernetes_io_name"]
+          target_label  = "app"
+        }
+      }
+
+      loki.source.kubernetes "pods" {
+        targets    = discovery.relabel.pods_logs.output
+        forward_to = [loki.write.loki.receiver]
+      }
+
+      loki.write "loki" {
+        endpoint {
+          url = "http://loki.monitoring.svc:3100/loki/api/v1/push"
+        }
+      }
+
+      // ── TRACES: receive OTLP from apps, forward to Tempo ────────
+      otelcol.receiver.otlp "default" {
+        grpc { endpoint = "0.0.0.0:4317" }
+        http { endpoint = "0.0.0.0:4318" }
+
+        output {
+          traces = [otelcol.exporter.otlphttp.tempo.input]
+        }
+      }
+
+      otelcol.exporter.otlphttp "tempo" {
+        client {
+          endpoint = "http://tempo.monitoring.svc:4318"
+        }
+      }
+
+controller:
+  type: daemonset
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+# Need these to read pod logs from the node filesystem
+mounts:
+  varlog: true
+  dockercontainers: true
+
+serviceAccount:
+  create: true
+
+rbac:
+  create: true

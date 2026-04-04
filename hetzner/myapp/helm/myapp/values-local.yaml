@@ -1,0 +1,27 @@
+# values-local.yaml — Rancher Desktop
+#
+# The image "myapp:dev" is built locally by `bb docker-build`.
+# Rancher Desktop (dockerd backend) makes it available to K8s
+# automatically — no registry push needed.
+
+image:
+  repository: myapp
+  tag: dev
+  pullPolicy: Never          # ← use local image, don't try to pull
+
+ingress:
+  enabled: true
+  className: traefik          # Rancher Desktop ships Traefik by default
+  host: myapp.localhost       # works out of the box on macOS/Linux
+  tls: false                  # no TLS needed locally
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 128Mi
+  limits:
+    cpu: 250m
+    memory: 384Mi
+
+otel:
+  enabled: "false"    # no Alloy/Tempo running locally by default
