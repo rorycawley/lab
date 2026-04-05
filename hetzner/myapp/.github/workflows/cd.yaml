@@ -1,48 +1,28 @@
-name: Build & Deploy
+name: CD — Deploy to Hetzner
 
 on:
-  push:
+  # Runs after CI completes on main
+  workflow_run:
+    workflows: ["CI — Build & Push"]
+    types: [completed]
     branches: [main]
+
+  # Or trigger manually from GitHub UI
+  workflow_dispatch:
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          platforms: linux/amd64
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
-
   deploy:
-    needs: build-and-push
     runs-on: ubuntu-latest
+    # Only deploy if CI succeeded (or if triggered manually)
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     steps:
       - uses: actions/checkout@v4
 
-      # ── Option A: Direct kubectl ────────────────────────────────
-      # Store your kubeconfig as a GitHub secret called KUBE_CONFIG
-      # (base64-encode it: base64 -w0 < clustername_kubeconfig.yaml)
       - name: Set up kubeconfig
         run: |
           mkdir -p $HOME/.kube
@@ -55,22 +35,21 @@ jobs:
         run: |
           helm upgrade --install myapp ./helm/myapp \
             -f ./helm/myapp/values-prod.yaml \
-            --set image.tag=${{ github.sha }}
+            --set image.repository=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }} \
+            --set image.tag=${{ github.sha }} \
+            --set ingress.host=${{ vars.PROD_HOST }}
 
       - name: Wait for rollout
         run: |
-          kubectl rollout status deployment/myapp --timeout=120s
+          kubectl rollout status deployment/myapp --timeout=180s
 
       - name: Smoke test
         run: |
-          # Get the ingress host from the Helm values
           APP_HOST=$(kubectl get ingress myapp -o jsonpath='{.spec.rules[0].host}')
-          # Get the load balancer IP as fallback
           LB_IP=$(kubectl get ingress myapp -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
 
           echo "Testing https://${APP_HOST}/health (via ${LB_IP})"
 
-          # Retry up to 5 times with 5s gaps (DNS + TLS can take a moment)
           for i in 1 2 3 4 5; do
             STATUS=$(curl -s -o /dev/null -w '%{http_code}' \
               --resolve "${APP_HOST}:443:${LB_IP}" \
@@ -93,4 +72,4 @@ jobs:
         run: |
           echo "Rolling back to previous release..."
           helm rollback myapp
-          echo "✗ Deploy failed — rolled back. Check logs with: bb k8s-logs"
+          echo "✗ Deploy failed — rolled back."

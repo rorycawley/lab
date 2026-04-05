@@ -11,7 +11,8 @@ myapp/
 ├── bb.edn                     ← babashka task runner
 ├── Dockerfile                 ← multi-stage build + OTel agent
 ├── .github/workflows/
-│   └── deploy.yaml            ← CI/CD pipeline
+│   ├── ci.yaml                ← build + push image on push/PR
+│   └── cd.yaml                ← deploy to Hetzner after CI succeeds
 ├── helm/myapp/
 │   ├── Chart.yaml
 │   ├── values.yaml            ← defaults
@@ -192,26 +193,59 @@ curl http://localhost:8080/health
 
 ---
 
-## Step 5: GitHub Actions CI/CD (optional)
+## Step 5: GitHub Actions CI/CD
 
-The pipeline (`.github/workflows/deploy.yaml`) automates this on every push to `main`:
+Once this is set up, your daily workflow becomes:
 
-1. Builds the Docker image for linux/amd64
-2. Pushes it to GitHub Container Registry (GHCR) tagged with the commit SHA
-3. Deploys via Helm, waits for rollout, runs smoke test
-4. Auto-rolls back if the smoke test fails
-
-**One-time setup — two GitHub secrets needed:**
-
-1. `GITHUB_TOKEN` — already available automatically, used for GHCR push
-2. `KUBE_CONFIG` — your Hetzner cluster kubeconfig, base64-encoded:
-
-```bash
-base64 -w0 < myapp_kubeconfig.yaml | pbcopy   # macOS
-# Paste into GitHub → Settings → Secrets → KUBE_CONFIG
+```
+Edit code → bb dev (REPL) → git push → GitHub Actions does the rest
 ```
 
-**Important:** Update `values-prod.yaml` with your actual GitHub username and domain before your first deploy.
+You stop running `bb docker-push` and `bb helm-prod` manually.
+
+**What stays on your laptop (one-time or rare):**
+- `bb tf-apply` / `bb tf-destroy` — infrastructure changes
+- `bb monitoring-install` — one-time monitoring setup
+- ClusterIssuer, DNS records — one-time
+
+**What GitHub Actions does (on every push to main):**
+
+| File | Trigger | What it does |
+|------|---------|-------------|
+| `ci.yaml` | Push to main + PRs | Build Docker image (amd64), push to GHCR |
+| `cd.yaml` | After CI succeeds on main | Deploy via Helm, smoke test, auto-rollback |
+
+CI also runs on pull requests (builds but doesn't push). CD can be triggered manually from the GitHub Actions UI.
+
+**One-time setup — two secrets + one variable:**
+
+1. **`KUBE_CONFIG`** secret — your kubeconfig, base64-encoded:
+
+```bash
+base64 < myapp_kubeconfig.yaml | pbcopy
+```
+
+Go to your repo → **Settings → Secrets and variables → Actions → New repository secret** → paste.
+
+2. **`PROD_HOST`** variable — your domain name:
+
+Go to **Settings → Secrets and variables → Actions → Variables tab → New repository variable**:
+- Name: `PROD_HOST`
+- Value: `myappk8s.net`
+
+3. **GHCR package must be public** — GitHub Actions pushes the image, but your Hetzner cluster pulls it. If it's private, the pull will fail with `401 Unauthorized`.
+
+`GITHUB_TOKEN` is provided automatically — no setup needed for GHCR push.
+
+**Test it:**
+
+```bash
+# Make a small change
+# Edit src/myapp/core.clj — change the hello message
+git add . && git commit -m "test ci/cd" && git push
+```
+
+Watch it at `github.com/YOUR_USER/myapp/actions`.
 
 ---
 
