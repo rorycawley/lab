@@ -1,5 +1,7 @@
 # Grafana — visualization (the G in LGTM)
 # Pre-configured with Loki, Tempo, and Mimir datasources.
+# Access via: bb grafana (port-forward to localhost:3000)
+# To enable ingress, set ingress.enabled=true and hosts below.
 
 replicas: 1
 
@@ -28,11 +30,11 @@ datasources:
         jsonData:
           timeInterval: 15s
 
-      # Loki for logs
+      # Loki for logs (via gateway)
       - name: Loki
         type: loki
         uid: loki
-        url: http://loki.monitoring.svc:3100
+        url: http://loki-gateway.monitoring.svc.cluster.local
         jsonData:
           derivedFields:
             # Click a traceID in logs → jump to Tempo trace
@@ -57,18 +59,19 @@ datasources:
           serviceMap:
             datasourceUid: mimir
 
-# ── Ingress ──────────────────────────────────────────────────────
+# ── Ingress (disabled by default — use bb grafana to port-forward) ─
+# To enable: set enabled=true and update hosts to your domain
 ingress:
-  enabled: true
-  ingressClassName: traefik
-  hosts:
-    - grafana.YOUR_DOMAIN.com           # ← change this (e.g. grafana.myappk8s.net)
-  tls:
-    - secretName: grafana-tls
-      hosts:
-        - grafana.YOUR_DOMAIN.com       # ← change this
-  annotations:
-    cert-manager.io/cluster-issuer: letsencrypt
+  enabled: false
+  # ingressClassName: traefik
+  # hosts:
+  #   - grafana.myappk8s.net
+  # tls:
+  #   - secretName: grafana-tls
+  #     hosts:
+  #       - grafana.myappk8s.net
+  # annotations:
+  #   cert-manager.io/cluster-issuer: letsencrypt
 
 # ── Dashboards ───────────────────────────────────────────────────
 dashboardProviders:

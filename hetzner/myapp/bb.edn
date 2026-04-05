@@ -70,33 +70,18 @@
                        (System/exit 1)))))))}
 
   ;; ── Helpers (internal, prefixed with -) ───────────────────────────
+  -gh-user
+  {:doc  "Auto-detect GitHub username"
+   :task (-> (shell {:out :string} "gh api user -q .login") :out clojure.string/trim)}
+
   -prod-host
-  {:doc  "Read the ingress host from values-prod.yaml"
-   :task (let [host (or (System/getenv "PROD_HOST")
-                        (-> (shell {:out :string}
-                                   "grep 'host:' helm/myapp/values-prod.yaml | head -1 | sed 's/.*host: *//' | sed 's/ .*//'")
-                            :out
-                            clojure.string/trim))]
-           (if (or (clojure.string/includes? host "YOUR_")
-                   (clojure.string/blank? host))
-             (do (println "✗ Set your domain in helm/myapp/values-prod.yaml (ingress.host)")
-                 (println "  Or set PROD_HOST env var")
+  {:doc  "Read PROD_HOST env var"
+   :task (let [host (System/getenv "PROD_HOST")]
+           (if (or (nil? host) (clojure.string/blank? host))
+             (do (println "✗ PROD_HOST not set. Run:")
+                 (println "  export PROD_HOST=yourdomain.com")
                  (System/exit 1))
              host))}
-
-  -check-prod-values
-  {:doc  "Verify values-prod.yaml has no unfilled placeholders"
-   :task (let [content (slurp "helm/myapp/values-prod.yaml")]
-           (when (clojure.string/includes? content "YOUR_GITHUB_USER")
-             (println "✗ Update helm/myapp/values-prod.yaml:")
-             (println "  Replace YOUR_GITHUB_USER with your GitHub username")
-             (println "  e.g. sed -i '' 's/YOUR_GITHUB_USER/yourusername/g' helm/myapp/values-prod.yaml")
-             (System/exit 1))
-           (when (clojure.string/includes? content "YOUR_DOMAIN")
-             (println "✗ Update helm/myapp/values-prod.yaml:")
-             (println "  Replace YOUR_DOMAIN.com with your domain")
-             (println "  e.g. sed -i '' 's/YOUR_DOMAIN.com/myappk8s.net/g' helm/myapp/values-prod.yaml")
-             (System/exit 1)))}
 
   -tf-init
   {:doc  "Run terraform init if .terraform is missing"
@@ -107,7 +92,7 @@
 
   ;; ── Smoke tests ───────────────────────────────────────────────────
   smoke-prod
-  {:doc  "Smoke test production (reads host from values-prod.yaml)"
+  {:doc  "Smoke test production (uses PROD_HOST env var)"
    :task (let [host (run '-prod-host)
                max-attempts 5]
            (loop [i 1]
@@ -162,21 +147,30 @@
 
   tf-kubeconfig
   {:doc  "Regenerate kubeconfig from Terraform state"
-   :task (do (shell {:dir "terraform"} "bash -c 'terraform output --raw kubeconfig | tr -d \\r > ../myapp_kubeconfig.yaml'")
+   :task (do (shell {:dir "terraform" :extra-env {"TERM" "dumb"}}
+                    "bash -c 'terraform output --raw kubeconfig > ../myapp_kubeconfig.yaml'")
              (println "✓ Written to myapp_kubeconfig.yaml")
              (println "  Run: export KUBECONFIG=$(pwd)/myapp_kubeconfig.yaml"))}
 
   ;; ── Production deploy ─────────────────────────────────────────────
+  ;; Auto-detects GitHub user from gh CLI.
+  ;; Reads domain from PROD_HOST env var.
+  ;; No need to edit values-prod.yaml — values are passed via --set.
   helm-prod
-  {:doc  "Deploy to production, wait, and smoke test"
-   :depends [-check-prod-values]
-   :task (do (shell "helm upgrade --install myapp ./helm/myapp -f ./helm/myapp/values-prod.yaml")
-             (shell "kubectl rollout status deployment/myapp --timeout=180s")
-             (run 'smoke-prod))}
+  {:doc  "Deploy to production (needs PROD_HOST env var)"
+   :task (let [user (run '-gh-user)
+               host (run '-prod-host)
+               image (str "ghcr.io/" user "/myapp")]
+           (shell (str "helm upgrade --install myapp ./helm/myapp"
+                       " -f ./helm/myapp/values-prod.yaml"
+                       " --set image.repository=" image
+                       " --set ingress.host=" host))
+           (shell "kubectl rollout status deployment/myapp --timeout=180s")
+           (run 'smoke-prod))}
 
   ;; ── Monitoring (LGTM stack) ─────────────────────────────────────
   monitoring-install
-  {:doc  "Install full Grafana LGTM stack (MinIO + Loki + Tempo + Mimir + Alloy + Grafana)"
+  {:doc  "Install full Grafana LGTM stack (Loki + MinIO + Mimir + Tempo + Alloy + Grafana)"
    :task (shell "bash monitoring/install.sh")}
 
   monitoring-status
@@ -190,7 +184,7 @@
              (shell {:continue true} "helm uninstall tempo   -n monitoring")
              (shell {:continue true} "helm uninstall loki    -n monitoring")
              (shell {:continue true} "helm uninstall mimir   -n monitoring")
-             (shell {:continue true} "helm uninstall minio   -n monitoring")
+             (shell {:continue true} "helm uninstall minio-mimir -n monitoring")
              (println "LGTM stack removed."))}
 
   grafana

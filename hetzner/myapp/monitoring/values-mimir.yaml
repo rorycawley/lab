@@ -10,7 +10,7 @@ mimir:
       storage:
         backend: s3
         s3:
-          endpoint: minio.monitoring.svc:9000
+          endpoint: minio-mimir.monitoring.svc:9000
           bucket_name: mimir-data
           access_key_id: minio
           secret_access_key: minio-secret-key-change-me
@@ -20,9 +20,6 @@ mimir:
       storage_prefix: blocks
       tsdb:
         dir: /data/tsdb
-
-    ruler_storage:
-      storage_prefix: ruler
 
     limits:
       native_histograms_ingestion_enabled: true
@@ -58,11 +55,9 @@ store_gateway:
 compactor:
   replicas: 0
 
-# Disable nginx gateway (monolithic exposes API directly)
 gateway:
   enabledNonEnterprise: false
 
-# Disable self-monitoring
 metaMonitoring:
   dashboards:
     enabled: false

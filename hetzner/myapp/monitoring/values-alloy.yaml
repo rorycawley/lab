@@ -123,7 +123,7 @@ alloy:
 
       loki.write "loki" {
         endpoint {
-          url = "http://loki.monitoring.svc:3100/loki/api/v1/push"
+          url = "http://loki-gateway.monitoring.svc.cluster.local/loki/api/v1/push"
         }
       }
 
@@ -153,7 +153,6 @@ resources:
   limits:
     memory: 256Mi
 
-# Need these to read pod logs from the node filesystem
 mounts:
   varlog: true
   dockercontainers: true

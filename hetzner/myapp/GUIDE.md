@@ -452,40 +452,41 @@ Your Clojure App
   ├── /metrics endpoint (iapetos)  ──→  Alloy  ──→  Mimir   ──→ ┐
   ├── stdout logs                  ──→  Alloy  ──→  Loki    ──→ ├─→ Grafana
   └── OTel Java agent (traces)    ──→  Alloy  ──→  Tempo   ──→ ┘
-                                                        ▲
-                                          MinIO (object storage for all three)
 ```
 
 **Components:**
 
-| Component | Role | Mode |
-|-----------|------|------|
-| MinIO | S3-compatible object storage | standalone |
-| Mimir | Metrics storage (replaces Prometheus) | monolithic |
-| Loki | Log aggregation | monolithic |
-| Tempo | Distributed tracing | monolithic |
-| Alloy | Collection agent (scrapes + ships everything) | DaemonSet |
-| Grafana | Dashboards + alerting | single replica |
+| Component | Role | Storage |
+|-----------|------|---------|
+| MinIO | Object storage for Mimir | standalone |
+| Mimir | Metrics (replaces Prometheus) | MinIO (standalone) |
+| Loki | Log aggregation | MinIO (built-in, chart v6.33.0) |
+| Tempo | Distributed tracing | Local filesystem (chart v1.10.3) |
+| Alloy | Collection agent | DaemonSet, no storage |
+| Grafana | Dashboards + alerting | PVC |
 
-All components run in monolithic/single-binary mode to keep pod count and memory usage reasonable on a small cluster.
+Loki and Tempo charts are pinned to specific versions because newer versions have breaking changes. Loki uses its own built-in MinIO (separate from the standalone one Mimir uses).
+
+**Install order matters:** Loki must install first because its built-in MinIO claims the `minio-sa` ServiceAccount. The standalone MinIO (for Mimir) installs second with a different SA name (`mimir-minio-sa`) to avoid conflicts. The install script handles this automatically.
 
 **Install the stack:**
 
 ```bash
 bb monitoring-install
-# Takes ~3 minutes, installs 6 Helm releases into the "monitoring" namespace
+# Takes ~5 minutes, installs 6 Helm releases into the "monitoring" namespace
 
 bb monitoring-status          # verify all pods are running
 bb grafana                    # port-forward → http://localhost:3000
+#                               Login: admin / admin-change-me
 ```
 
 **What you get out of the box:**
 
 1. **Metrics** — Alloy auto-scrapes any pod with the `prometheus.io/scrape: "true"` annotation. Your app exposes JVM metrics (heap, GC, threads) and HTTP request metrics (count, latency histogram) via iapetos at `/metrics`.
 
-2. **Logs** — Alloy collects stdout/stderr from every pod and ships to Loki. In Grafana, go to Explore → Loki → `{app="myapp"}` to search your logs.
+2. **Logs** — Alloy collects stdout/stderr from every pod and ships to Loki. In Grafana, go to Explore → Loki → `{namespace="default"}` to search your app's logs.
 
-3. **Traces** — The OpenTelemetry Java agent (bundled in the Docker image) auto-instruments Jetty, HTTP clients, and JDBC. Trace spans are sent via OTLP to Alloy → Tempo. In Grafana, Explore → Tempo to search traces. Click a traceID in a log line to jump directly to the trace.
+3. **Traces** — The OpenTelemetry Java agent (bundled in the Docker image) auto-instruments Jetty, HTTP clients, and JDBC. Trace spans are sent via OTLP to Alloy → Tempo. In Grafana, Explore → Tempo to search traces.
 
 **How your app is instrumented (zero code needed for traces):**
 
@@ -493,11 +494,8 @@ bb grafana                    # port-forward → http://localhost:3000
 - `opentelemetry-javaagent.jar` (in Dockerfile) → auto-instruments Jetty, emits trace spans via OTLP
 - Logs → just `println` to stdout, Alloy picks them up
 
-**Disabling tracing locally:**
-The `values-local.yaml` sets `otel.enabled: "false"` so the OTel agent doesn't try to connect to a non-existent Alloy when running on Rancher Desktop.
-
 **Enabling tracing in production:**
-OTel is disabled by default in all values files. After installing the LGTM stack (`bb monitoring-install`), enable it:
+OTel is disabled by default. After installing the LGTM stack, enable it:
 
 ```bash
 # Edit helm/myapp/values-prod.yaml → otel.enabled: "true"
@@ -505,11 +503,19 @@ OTel is disabled by default in all values files. After installing the LGTM stack
 bb helm-prod
 ```
 
+**Accessing Grafana:**
+Grafana ingress is disabled by default. Access via port-forward:
+
+```bash
+bb grafana
+# → http://localhost:3000
+```
+
 **Changing credentials:**
 Before going to production, update the passwords in:
 - `monitoring/values-minio.yaml` → `rootPassword`
 - `monitoring/values-grafana.yaml` → `adminPassword`
-- Update the matching credentials in `values-loki.yaml`, `values-tempo.yaml`, `values-mimir.yaml`
+- Update the matching password in `monitoring/values-mimir.yaml`
 
 ---
 
@@ -551,7 +557,13 @@ Before going to production, update the passwords in:
 
 ### Monitoring
 
-**MinIO credentials:** All LGTM components reference the same MinIO password. If you change it in `values-minio.yaml`, you must also update it in `values-loki.yaml`, `values-tempo.yaml`, and `values-mimir.yaml`. A production setup would use K8s Secrets instead of inline passwords.
+**Chart version pinning:** Loki is pinned to chart v6.33.0 and Tempo to v1.10.3. Newer versions have breaking changes. The install script handles this automatically.
+
+**Install order matters.** Loki must install first — its built-in MinIO claims the `minio-sa` ServiceAccount. The standalone MinIO (for Mimir) uses `mimir-minio-sa` instead. If you see `ServiceAccount "minio-sa" already exists`, it means the install order was wrong. Run `bb monitoring-uninstall` and `bb monitoring-install` to start clean.
+
+**Loki has its own MinIO.** The standalone MinIO (`minio-mimir`) is only for Mimir. If you change its password in `values-minio.yaml`, only update `values-mimir.yaml`.
+
+**Grafana ingress is disabled by default.** Access via `bb grafana` (port-forward). To enable public access, uncomment the ingress section in `monitoring/values-grafana.yaml`.
 
 **kube-hetzner updates:** The Terraform module pins k3s and MicroOS versions. Run `terraform apply` periodically to pick up updates, but read the changelog first.
 

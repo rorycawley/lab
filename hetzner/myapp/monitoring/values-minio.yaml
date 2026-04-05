@@ -1,14 +1,13 @@
-# MinIO — S3-compatible object storage for LGTM backends
-# All three (Loki, Tempo, Mimir) need object storage for data.
-# MinIO runs inside the cluster so you don't need an external S3.
+# MinIO — S3-compatible object storage for Mimir
+# Loki has its own built-in MinIO. Tempo uses local filesystem.
+# This instance is only used by Mimir for metrics storage.
 
 mode: standalone
-
 replicas: 1
 
 persistence:
   enabled: true
-  size: 20Gi
+  size: 10Gi
 
 resources:
   requests:
@@ -17,19 +16,13 @@ resources:
   limits:
     memory: 512Mi
 
-# Root credentials — change these!
+# Root credentials — change these for production!
 rootUser: minio
 rootPassword: minio-secret-key-change-me
 
-# Pre-create buckets for each LGTM component
 buckets:
-  - name: loki-data
-    policy: none
-  - name: tempo-data
-    policy: none
   - name: mimir-data
     policy: none
 
-# Disable console to save resources (use mc CLI instead)
 console:
   enabled: false

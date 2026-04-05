@@ -1,20 +1,14 @@
 # Tempo — distributed tracing (the T in LGTM)
-# Monolithic mode: single process for trace ingestion + querying.
-# Receives traces via OTLP from Alloy, stores in MinIO.
+# Uses local filesystem for storage (simple, no external deps).
+# ⚠️ Pinned to chart version 1.10.3 (newer versions are deprecated)
 
 tempo:
   storage:
     trace:
-      backend: s3
-      s3:
-        bucket: tempo-data
-        endpoint: minio.monitoring.svc:9000
-        access_key: minio
-        secret_key: minio-secret-key-change-me
-        insecure: true
-        forcepathstyle: true
+      backend: local
+      local:
+        path: /var/tempo/traces
 
-  # Enable OTLP receivers (gRPC + HTTP)
   receivers:
     otlp:
       protocols:
@@ -23,10 +17,8 @@ tempo:
         http:
           endpoint: "0.0.0.0:4318"
 
-  # Enable metrics generator for trace-to-metrics (RED metrics)
   metricsGenerator:
-    enabled: true
-    remoteWriteUrl: "http://mimir.monitoring.svc:9009/api/v1/push"
+    enabled: false
 
   retention: 168h                   # 7 days
 
