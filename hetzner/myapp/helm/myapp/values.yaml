@@ -15,6 +15,7 @@ ingress:
   host: ""
   tls: false
   clusterIssuer: ""
+  annotations: {}          # cloud-specific annotations go here
 
 resources:
   requests:

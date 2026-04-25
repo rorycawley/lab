@@ -28,8 +28,8 @@ provider "hcloud" {
 
 module "kube-hetzner" {
   source  = "kube-hetzner/kube-hetzner/hcloud"
-  # Pin to a specific version — check GitHub for latest
-  # https://github.com/kube-hetzner/terraform-hcloud-kube-hetzner/releases
+  version = "~> 2.15"
+  # Check for latest: https://registry.terraform.io/modules/kube-hetzner/kube-hetzner/hcloud/latest
 
   providers = {
     hcloud = hcloud

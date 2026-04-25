@@ -83,12 +83,20 @@
                  (System/exit 1))
              host))}
 
+  -tf-dir
+  {:doc  "Terraform working directory (set CLOUD env var for multi-cloud)"
+   :task (let [cloud (System/getenv "CLOUD")]
+           (if (and cloud (not (clojure.string/blank? cloud)))
+             (str "terraform/" cloud)
+             "terraform"))}
+
   -tf-init
   {:doc  "Run terraform init if .terraform is missing"
-   :task (let [tf-dir (clojure.java.io/file "terraform" ".terraform")]
+   :task (let [dir (run '-tf-dir)
+               tf-dir (clojure.java.io/file dir ".terraform")]
            (when-not (.exists tf-dir)
-             (println "Running terraform init...")
-             (shell {:dir "terraform"} "terraform init")))}
+             (println (str "Running terraform init in " dir "..."))
+             (shell {:dir dir} "terraform init")))}
 
   ;; ── Smoke tests ───────────────────────────────────────────────────
   smoke-prod
@@ -129,28 +137,114 @@
   {:doc  "Open a shell in a running pod"
    :task (shell "kubectl exec -it deploy/myapp -- sh")}
 
+  ;; ── Cluster setup (one-time, after tf-apply) ──────────────────────
+  cluster-issuer
+  {:doc  "Create Let's Encrypt ClusterIssuer (needs ACME_EMAIL env var)"
+   :task (let [email (or (System/getenv "ACME_EMAIL") "")
+               ingress-class (or (System/getenv "INGRESS_CLASS") "traefik")]
+           (if (clojure.string/blank? email)
+             (do (println "✗ ACME_EMAIL not set. Run:")
+                 (println "  export ACME_EMAIL=you@example.com")
+                 (System/exit 1))
+             (do (shell {:in (str "apiVersion: cert-manager.io/v1\n"
+                                  "kind: ClusterIssuer\n"
+                                  "metadata:\n"
+                                  "  name: letsencrypt\n"
+                                  "spec:\n"
+                                  "  acme:\n"
+                                  "    server: https://acme-v02.api.letsencrypt.org/directory\n"
+                                  "    email: " email "\n"
+                                  "    privateKeySecretRef:\n"
+                                  "      name: letsencrypt-account-key\n"
+                                  "    solvers:\n"
+                                  "      - http01:\n"
+                                  "          ingress:\n"
+                                  "            class: " ingress-class "\n")}
+                        "kubectl apply -f -")
+                 (println (str "✓ ClusterIssuer created (email: " email ", ingress: " ingress-class ")")))))}
+
+  cert-status
+  {:doc  "Show TLS certificate status and expiry"
+   :task (do (shell {:continue true}
+                    "kubectl get certificate -o custom-columns=NAME:.metadata.name,READY:.status.conditions[0].status,EXPIRES:.status.notAfter,RENEWS:.status.renewalTime")
+             (println "")
+             (println "cert-manager renews automatically at the RENEWS date.")
+             (println "If READY is not True, run: kubectl describe certificate <name>"))}
+
+
+  ingress-install
+  {:doc  "Install nginx-ingress controller (for clouds without Traefik)"
+   :task (do (println "Installing nginx-ingress controller...")
+             (shell "helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx")
+             (shell "helm repo update")
+             (shell (str "helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx"
+                         " -n ingress-nginx --create-namespace"
+                         " --set controller.replicaCount=2"
+                         " --wait --timeout 120s"))
+             (println "✓ nginx-ingress installed")
+             (println "  Use INGRESS_CLASS=nginx for ClusterIssuer and Helm values"))}
+
+  cert-manager-install
+  {:doc  "Install cert-manager (for clouds without it pre-installed)"
+   :task (do (println "Installing cert-manager...")
+             (shell "helm repo add jetstack https://charts.jetstack.io")
+             (shell "helm repo update")
+             (shell (str "helm upgrade --install cert-manager jetstack/cert-manager"
+                         " -n cert-manager --create-namespace"
+                         " --set crds.enabled=true"
+                         " --wait --timeout 120s"))
+             (println "✓ cert-manager installed")
+             (println "  Now run: bb cluster-issuer"))}
   ;; ── Terraform ─────────────────────────────────────────────────────
+  ;; Set CLOUD env var for multi-cloud (e.g. CLOUD=aws bb tf-apply)
+  ;; Defaults to terraform/ directory for backwards compatibility.
   tf-plan
-  {:doc  "Terraform plan for Hetzner cluster"
+  {:doc  "Terraform plan"
    :depends [-tf-init]
-   :task (shell {:dir "terraform"} "terraform plan")}
+   :task (shell {:dir (run '-tf-dir)} "terraform plan")}
 
   tf-apply
-  {:doc  "Terraform apply (creates/updates Hetzner cluster)"
+  {:doc  "Terraform apply (creates/updates cluster)"
    :depends [-tf-init]
-   :task (shell {:dir "terraform"} "terraform apply -auto-approve")}
+   :task (shell {:dir (run '-tf-dir)} "terraform apply -auto-approve")}
 
   tf-destroy
-  {:doc  "Destroy Hetzner cluster (stops billing)"
+  {:doc  "Uninstall apps, delete volumes, destroy cluster"
    :depends [-tf-init]
-   :task (shell {:dir "terraform"} "terraform destroy -auto-approve")}
+   :task (let [dir (run '-tf-dir)]
+           ;; Uninstall monitoring + app so PVCs are released
+           (println "==> Uninstalling apps and monitoring...")
+           (shell {:continue true} "helm uninstall myapp")
+           (shell {:continue true} "helm uninstall grafana -n monitoring")
+           (shell {:continue true} "helm uninstall alloy   -n monitoring")
+           (shell {:continue true} "helm uninstall tempo   -n monitoring")
+           (shell {:continue true} "helm uninstall loki    -n monitoring")
+           (shell {:continue true} "helm uninstall mimir   -n monitoring")
+           (shell {:continue true} "helm uninstall minio-mimir -n monitoring")
+           ;; Delete PVCs so Hetzner volumes are released
+           (println "==> Deleting persistent volume claims...")
+           (shell {:continue true} "kubectl delete pvc --all -n monitoring")
+           (shell {:continue true} "kubectl delete namespace monitoring")
+           (println "==> Waiting 15s for volumes to detach...")
+           (Thread/sleep 15000)
+           ;; Destroy cluster
+           (println (str "==> Destroying cluster (" dir ")..."))
+           (shell {:dir dir} "terraform destroy -auto-approve")
+           ;; Clean up orphaned CSI volumes only (named pvc-*).
+           ;; This is scoped to volumes created by the K8s CSI driver —
+           ;; it will NOT delete manually created or non-cluster volumes.
+           (println "==> Cleaning up orphaned CSI volumes (pvc-* only)...")
+           (shell {:continue true} "bash -c 'hcloud volume list -o noheader -o columns=id,name 2>/dev/null | grep pvc- | awk \"{print \\$1}\" | xargs -I {} hcloud volume delete {}'")
+           (println "✓ Cluster destroyed. Billing should stop once all resources are removed.")
+           (println "  Verify in Hetzner Console that no servers, LBs, or volumes remain."))}
 
   tf-kubeconfig
   {:doc  "Regenerate kubeconfig from Terraform state"
-   :task (do (shell {:dir "terraform" :extra-env {"TERM" "dumb"}}
-                    "bash -c 'terraform output --raw kubeconfig > ../myapp_kubeconfig.yaml'")
-             (println "✓ Written to myapp_kubeconfig.yaml")
-             (println "  Run: export KUBECONFIG=$(pwd)/myapp_kubeconfig.yaml"))}
+   :task (let [dir (run '-tf-dir)]
+           (shell {:dir dir :extra-env {"TERM" "dumb"}}
+                  "bash -c 'terraform output --raw kubeconfig > ../myapp_kubeconfig.yaml'")
+           (println "✓ Written to myapp_kubeconfig.yaml")
+           (println "  Run: export KUBECONFIG=$(pwd)/myapp_kubeconfig.yaml"))}
 
   ;; ── Production deploy ─────────────────────────────────────────────
   ;; Auto-detects GitHub user from gh CLI.

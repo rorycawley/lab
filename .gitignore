@@ -1,0 +1,65 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# Editors / IDEs
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# Clojure / tooling caches
+.clj-kondo/.cache/
+.lsp/.cache/
+.cpcache/
+.shadow-cljs/
+.nrepl-port
+.portal/
+pom.xml.asc
+
+# Build output
+target/
+classes/
+out/
+*.jar
+*.war
+node_modules/
+
+# Logs
+*.log
+logs/
+
+# Terraform
+**/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+!example.tfvars
+crash.log
+crash.*.log
+.terraform.lock.hcl
+
+# Kubernetes / Helm secrets
+*kubeconfig*.yaml
+*kubeconfig*.yml
+kubeconfig
+charts/
+*.tgz
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+secrets/
+
+# OS / misc
+Thumbs.db
+.direnv/

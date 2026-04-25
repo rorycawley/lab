@@ -20,14 +20,32 @@ RUN addgroup -S app && adduser -S app -G app
 
 WORKDIR /app
 
-# Download OpenTelemetry Java agent for automatic trace instrumentation
-# This auto-instruments Jetty, HTTP clients, JDBC etc. — zero code changes.
-# Controlled via OTEL_* env vars in K8s deployment.
-ADD --chmod=644 \
-  https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v2.11.0/opentelemetry-javaagent.jar \
-  /app/opentelemetry-javaagent.jar
+# Download OpenTelemetry Java agent with checksum verification.
+# The checksum file is published alongside the JAR in each GitHub
+# release. If the checksum doesn't match, the build fails —
+# catching supply-chain tampering at build time.
+#
+# To update: change OTEL_VERSION and rebuild.
+ARG OTEL_VERSION=2.11.0
+RUN apk add --no-cache curl \
+    && curl -fSL -o opentelemetry-javaagent.jar \
+       "https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_VERSION}/opentelemetry-javaagent.jar" \
+    && curl -fSL -o opentelemetry-javaagent.jar.sha256 \
+       "https://github.com/open-telemetry/opentelemetry-java-instrumentation/releases/download/v${OTEL_VERSION}/opentelemetry-javaagent.jar.sha256" \
+    && echo "$(cat opentelemetry-javaagent.jar.sha256)  opentelemetry-javaagent.jar" | sha256sum -c - \
+    && rm opentelemetry-javaagent.jar.sha256 \
+    && chmod 644 opentelemetry-javaagent.jar \
+    && apk del curl
 
 COPY --from=builder /app/target/app.jar .
+
+# Entrypoint script: conditionally loads the OTel Java agent.
+# When OTEL_JAVAAGENT_ENABLED=true, the agent is attached via -javaagent
+# and instruments Jetty, HTTP clients, JDBC, etc. automatically.
+# When false (the default), the agent JAR is never loaded — no startup
+# overhead, no connection attempts to Alloy.
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
 
 USER app
 EXPOSE 8080
@@ -35,8 +53,4 @@ EXPOSE 8080
 HEALTHCHECK --interval=10s --timeout=3s --start-period=15s \
   CMD wget -qO- http://localhost:8080/health || exit 1
 
-# OTEL_JAVAAGENT_ENABLED (default: true) controls whether the agent loads.
-# Set to "false" in values-local.yaml if you don't need tracing locally.
-ENTRYPOINT ["java", "-XX:+UseContainerSupport", \
-            "-javaagent:/app/opentelemetry-javaagent.jar", \
-            "-jar", "app.jar"]
+ENTRYPOINT ["/app/entrypoint.sh"]
