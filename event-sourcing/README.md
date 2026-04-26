@@ -91,6 +91,26 @@ Remove all runtime state:
 make clean
 ```
 
+## Learning UI
+
+The API serves a small HTML page at `/ui` that walks through the
+command -> event -> projector -> read-model loop with buttons. After
+`make up`, start a port-forward in one terminal:
+
+```sh
+make port-forward
+```
+
+Then open <http://localhost:8080/ui> in a browser. The page lets you:
+
+1. Create a task (writes a `task-created` event).
+2. Show the raw event log from `domain_events`.
+3. Run the projector to update the read store.
+4. Show projected tasks from `task_read_model`.
+
+Steps 2 and 4 make the CQRS split visible: new tasks only appear in
+step 4 after step 3 runs.
+
 ## Useful Targets
 
 - `make up` - start Postgres, run Flyway jobs, deploy the API
@@ -121,6 +141,10 @@ Query endpoints read state or event history:
 - `GET /queries/tasks`
 - `GET /queries/tasks/{task_id}`
 - `GET /queries/projection`
+
+Browser UI (see [Learning UI](#learning-ui)):
+
+- `GET /ui`
 
 Every command needs an `Idempotency-Key` header.
 

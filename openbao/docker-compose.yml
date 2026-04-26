@@ -1,0 +1,39 @@
+services:
+  openbao:
+    image: openbao/openbao:2.4.1
+    container_name: openbao-demo-server
+    cap_add:
+      - IPC_LOCK
+    ports:
+      - "8200:8200"
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: root
+      BAO_DEV_LISTEN_ADDRESS: 0.0.0.0:8200
+      BAO_ADDR: http://127.0.0.1:8200
+    command: ["server", "-dev", "-dev-root-token-id=root", "-dev-listen-address=0.0.0.0:8200"]
+    healthcheck:
+      test: ["CMD", "bao", "status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  postgres:
+    image: postgres:18
+    container_name: openbao-demo-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: pocdb
+      POSTGRES_USER: vaultadmin
+      POSTGRES_PASSWORD: vaultadminpass
+    volumes:
+      - pg_data:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vaultadmin -d pocdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  pg_data:

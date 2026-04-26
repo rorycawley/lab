@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Demo runtime output
+logs/
+*.log
+
+# Defensive: never commit a rendered Kubernetes Secret. The bootstrap
+# script writes the AppRole creds via `kubectl create ... | apply`,
+# but if anyone ever templates one to disk it must stay local.
+k8s/*-secret.yaml
+k8s/*-secret.yml
+
+# Defensive: env files and any local override
+.env
+.env.*
+
+# OS / editor
+.DS_Store
+*.swp

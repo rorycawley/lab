@@ -1,0 +1,205 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-lgtm-datasources
+  namespace: grafana-lgtm-demo
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Loki
+        uid: loki
+        type: loki
+        access: proxy
+        url: http://localhost:3100
+        isDefault: false
+      - name: Tempo
+        uid: tempo
+        type: tempo
+        access: proxy
+        url: http://localhost:3200
+        isDefault: false
+        jsonData:
+          tracesToLogsV2:
+            datasourceUid: loki
+            filterByTraceID: true
+          serviceMap:
+            datasourceUid: mimir
+      - name: Mimir
+        uid: mimir
+        type: prometheus
+        access: proxy
+        url: http://localhost:9090
+        isDefault: true
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-lgtm-dashboard-provider
+  namespace: grafana-lgtm-demo
+data:
+  provider.yaml: |
+    apiVersion: 1
+    providers:
+      - name: local-demo
+        orgId: 1
+        folder: Demo
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 10
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-lgtm-alerting
+  namespace: grafana-lgtm-demo
+data:
+  demo-alerts.yaml: |
+    apiVersion: 1
+    groups:
+      - orgId: 1
+        name: OTel demo alerts
+        folder: Demo
+        interval: 10s
+        rules:
+          - uid: otel-demo-error-rate
+            title: OTel demo error rate
+            condition: C
+            data:
+              - refId: A
+                datasourceUid: mimir
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                model:
+                  datasource:
+                    type: prometheus
+                    uid: mimir
+                  editorMode: code
+                  expr: sum(rate(demo_errors_total[5m]))
+                  instant: true
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+                  range: false
+                  refId: A
+              - refId: B
+                datasourceUid: __expr__
+                relativeTimeRange:
+                  from: 0
+                  to: 0
+                model:
+                  datasource:
+                    type: __expr__
+                    uid: __expr__
+                  expression: A
+                  reducer: last
+                  refId: B
+                  type: reduce
+              - refId: C
+                datasourceUid: __expr__
+                relativeTimeRange:
+                  from: 0
+                  to: 0
+                model:
+                  conditions:
+                    - evaluator:
+                        params:
+                          - 0.001
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                          - C
+                      reducer:
+                        params: []
+                        type: last
+                      type: query
+                  datasource:
+                    type: __expr__
+                    uid: __expr__
+                  expression: B
+                  refId: C
+                  type: threshold
+            noDataState: OK
+            execErrState: Error
+            for: 0s
+            annotations:
+              summary: Demo app is returning errors.
+              description: The demo /error endpoint has emitted errors in the last five minutes.
+            labels:
+              service: otel-demo-app
+              severity: warning
+              demo: grafana-lgtm
+          - uid: otel-demo-average-latency
+            title: OTel demo average latency
+            condition: C
+            data:
+              - refId: A
+                datasourceUid: mimir
+                relativeTimeRange:
+                  from: 300
+                  to: 0
+                model:
+                  datasource:
+                    type: prometheus
+                    uid: mimir
+                  editorMode: code
+                  expr: sum(demo_request_duration_ms_milliseconds_sum) / sum(demo_request_duration_ms_milliseconds_count)
+                  instant: true
+                  intervalMs: 1000
+                  maxDataPoints: 43200
+                  range: false
+                  refId: A
+              - refId: B
+                datasourceUid: __expr__
+                relativeTimeRange:
+                  from: 0
+                  to: 0
+                model:
+                  datasource:
+                    type: __expr__
+                    uid: __expr__
+                  expression: A
+                  reducer: last
+                  refId: B
+                  type: reduce
+              - refId: C
+                datasourceUid: __expr__
+                relativeTimeRange:
+                  from: 0
+                  to: 0
+                model:
+                  conditions:
+                    - evaluator:
+                        params:
+                          - 100
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                          - C
+                      reducer:
+                        params: []
+                        type: last
+                      type: query
+                  datasource:
+                    type: __expr__
+                    uid: __expr__
+                  expression: B
+                  refId: C
+                  type: threshold
+            noDataState: OK
+            execErrState: Error
+            for: 0s
+            annotations:
+              summary: Demo app average latency is above 100 ms.
+              description: Synthetic request duration is high enough to demonstrate Grafana alert evaluation.
+            labels:
+              service: otel-demo-app
+              severity: info
+              demo: grafana-lgtm

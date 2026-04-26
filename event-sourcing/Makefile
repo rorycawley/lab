@@ -25,8 +25,9 @@ help:
 	@echo "  make verify-db"
 	@echo "  make clean"
 	@echo ""
-	@echo "Learning UI after port-forward:"
-	@echo "  $(APP_URL)/ui"
+	@echo "Learning UI:"
+	@echo "  make port-forward    # in one terminal"
+	@echo "  open $(APP_URL)/ui   # buttons for command -> events -> projector -> read model"
 
 postgres:
 	./scripts/01-start-postgres.sh

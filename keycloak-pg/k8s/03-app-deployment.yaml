@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-pg-demo-app
+  namespace: keycloak-pg-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak-pg-demo-app
+  template:
+    metadata:
+      labels:
+        app: keycloak-pg-demo-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: keycloak-pg-demo-app:demo
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: KEYCLOAK_TOKEN_URL
+              value: http://external-keycloak:8180/realms/poc/protocol/openid-connect/token
+            - name: PG_PROXY_HOST
+              value: external-pg-proxy
+            - name: PG_PROXY_PORT
+              value: "6432"
+            - name: PG_DATABASE
+              value: pocdb
+            - name: PG_USER_FIELD
+              value: poc-app
+            - name: KEYCLOAK_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-client
+                  key: client_id
+            - name: KEYCLOAK_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-client
+                  key: client_secret
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10

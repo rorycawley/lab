@@ -1,0 +1,81 @@
+services:
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.0
+    container_name: keycloak-pg-demo-keycloak
+    command: ["start-dev", "--http-port=8080"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HEALTH_ENABLED: "true"
+      KC_HTTP_ENABLED: "true"
+      KC_HOSTNAME_STRICT: "false"
+    ports:
+      # Host port 8180 to leave 8080 free for the app's k8s port-forward.
+      - "8180:8080"
+    healthcheck:
+      test:
+        - "CMD-SHELL"
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000;
+          printf 'GET /health/ready HTTP/1.0\r\nHost: localhost\r\n\r\n' >&3;
+          grep -q '"status": "UP"' <&3
+      interval: 5s
+      timeout: 5s
+      retries: 40
+
+  postgres:
+    image: postgres:18
+    container_name: keycloak-pg-demo-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: pocdb
+      POSTGRES_USER: pgadmin
+      POSTGRES_PASSWORD: pgadminpass
+      # Cleartext password auth on the compose network. The pg-jwt-proxy
+      # is the only thing that connects, and it has the JWT it just
+      # validated as the *real* credential. See README.
+      POSTGRES_HOST_AUTH_METHOD: password
+    volumes:
+      - pg_data:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgadmin -d pocdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  pg-jwt-proxy:
+    build: ./proxy
+    image: keycloak-pg-demo-proxy:demo
+    container_name: keycloak-pg-demo-proxy
+    depends_on:
+      keycloak:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    ports:
+      # Listening port the app uses as if it were Postgres.
+      - "6432:6432"
+    environment:
+      LISTEN_HOST: 0.0.0.0
+      LISTEN_PORT: "6432"
+      UPSTREAM_PG_HOST: postgres
+      UPSTREAM_PG_PORT: "5432"
+      UPSTREAM_PG_USER: pgproxy
+      UPSTREAM_PG_PASSWORD: pgproxypass
+      UPSTREAM_PG_DATABASE: pocdb
+      # JWKS lives on the compose network at the keycloak service name.
+      JWKS_URL: http://keycloak:8080/realms/poc/protocol/openid-connect/certs
+      # The iss claim in tokens is the URL the *client* used to fetch
+      # the token. The app in k8s reaches Keycloak via the
+      # external-keycloak ExternalName Service, so that is the iss we
+      # expect. See README "Issuer mismatch" note.
+      EXPECTED_ISS: http://external-keycloak:8180/realms/poc
+      EXPECTED_AZP: poc-app
+      # Claim in the JWT whose value is used as `SET ROLE <value>` on
+      # the upstream Postgres connection.
+      ROLE_CLAIM: pg_role
+
+volumes:
+  pg_data:

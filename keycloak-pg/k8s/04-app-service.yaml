@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: keycloak-pg-demo-app
+  namespace: keycloak-pg-demo
+spec:
+  selector:
+    app: keycloak-pg-demo-app
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

@@ -1,0 +1,95 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-demo-app
+  namespace: grafana-lgtm-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: otel-demo-app
+  template:
+    metadata:
+      labels:
+        app: otel-demo-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: otel-demo-app:demo
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: OTEL_SERVICE_NAME
+              value: otel-demo-app
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: http://grafana-lgtm:4318
+            - name: OTEL_RESOURCE_ATTRIBUTES
+              value: service.namespace=grafana-lgtm-demo,deployment.environment=rancher-desktop,k8s.deployment.name=otel-demo-app
+            - name: K8S_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: K8S_POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: K8S_NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: K8S_POD_IP
+              valueFrom:
+                fieldRef:
+                  fieldPath: status.podIP
+            - name: K8S_DEPLOYMENT_NAME
+              value: otel-demo-app
+            - name: K8S_CONTAINER_NAME
+              value: api
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-demo-app
+  namespace: grafana-lgtm-demo
+spec:
+  selector:
+    app: otel-demo-app
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

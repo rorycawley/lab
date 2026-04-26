@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openbao-demo-app
+  namespace: openbao-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: openbao-demo-app
+  template:
+    metadata:
+      labels:
+        app: openbao-demo-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: openbao-demo-app:demo
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: OPENBAO_ADDR
+              value: http://external-openbao:8200
+            - name: POSTGRES_HOST
+              value: external-postgres
+            - name: POSTGRES_PORT
+              value: "5432"
+            - name: POSTGRES_DB
+              value: pocdb
+            - name: OPENBAO_KV_MOUNT
+              value: kv
+            - name: OPENBAO_KV_PATH
+              value: postgres
+            - name: OPENBAO_DB_ROLE
+              value: poc-role
+            - name: OPENBAO_ROLE_ID
+              valueFrom:
+                secretKeyRef:
+                  name: openbao-approle
+                  key: role_id
+            - name: OPENBAO_SECRET_ID
+              valueFrom:
+                secretKeyRef:
+                  name: openbao-approle
+                  key: secret_id
+          startupProbe:
+            httpGet:
+              path: /db-healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
