@@ -1,0 +1,39 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: read-store-flyway-migrations
+  namespace: registry-poc
+data:
+  V001__create_company_read_model.sql: |
+    CREATE TABLE IF NOT EXISTS company_read_model (
+        company_number TEXT PRIMARY KEY,
+        company_name TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'Registered',
+        last_event_id UUID,
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+    );
+
+    INSERT INTO company_read_model (
+        company_number,
+        company_name,
+        status,
+        last_event_id,
+        updated_at
+    )
+    VALUES (
+        '123456',
+        'Example Company Ltd',
+        'Registered',
+        '11111111-1111-1111-1111-111111111111',
+        now()
+    )
+    ON CONFLICT (company_number) DO NOTHING;
+
+  V002__add_registered_address.sql: |
+    ALTER TABLE company_read_model
+    ADD COLUMN IF NOT EXISTS registered_address TEXT;
+
+    UPDATE company_read_model
+    SET registered_address = '1 Main Street, Dublin'
+    WHERE company_number = '123456'
+      AND registered_address IS NULL;

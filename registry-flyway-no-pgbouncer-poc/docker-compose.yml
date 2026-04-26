@@ -1,0 +1,38 @@
+services:
+  event-postgres:
+    image: postgres:16
+    container_name: registry-event-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: registry_events
+      POSTGRES_USER: registry
+      POSTGRES_PASSWORD: registry
+    volumes:
+      - event_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registry -d registry_events"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  read-postgres:
+    image: postgres:16
+    container_name: registry-read-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: registry_read
+      POSTGRES_USER: registry
+      POSTGRES_PASSWORD: registry
+    volumes:
+      - read_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U registry -d registry_read"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  event_pgdata:
+  read_pgdata:

@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: registry-python-app
+  namespace: registry-poc
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: registry-python-app
+  template:
+    metadata:
+      labels:
+        app: registry-python-app
+    spec:
+      containers:
+        - name: registry-python-app
+          image: registry-python-app:poc
+          # Image is loaded into the local Docker store by scripts/02-build-python-image.sh.
+          # Rancher Desktop with the dockerd/Moby backend shares that store with Kubernetes,
+          # so Never works without a registry. With containerd, build into the k8s.io
+          # namespace via `nerdctl -n k8s.io build` instead.
+          imagePullPolicy: Never
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: EVENT_STORE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: registry-db-secret
+                  key: event_store_database_url
+            - name: READ_STORE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: registry-db-secret
+                  key: read_store_database_url
+          # startupProbe gates Ready on DB reachability without paying for /db-healthz on
+          # every readiness check. Once it succeeds, readiness/liveness fall through to the
+          # cheap /healthz path.
+          startupProbe:
+            httpGet:
+              path: /db-healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
