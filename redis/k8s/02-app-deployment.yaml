@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis-demo-app
+  namespace: redis-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: redis-demo-app
+  template:
+    metadata:
+      labels:
+        app: redis-demo-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: redis-demo-app:demo
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: REDIS_HOST
+              value: external-redis
+            - name: REDIS_PORT
+              value: "6379"
+            - name: REDIS_PASSWORD
+              value: redispass
+            - name: REDIS_DB
+              value: "0"
+            - name: CACHE_KEY_PREFIX
+              value: "item:"
+            - name: CACHE_TTL_SECONDS
+              value: "60"
+            - name: ORIGIN_LATENCY_MS
+              value: "200"
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            initialDelaySeconds: 3
+            periodSeconds: 3
+            failureThreshold: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10

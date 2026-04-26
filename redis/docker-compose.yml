@@ -1,0 +1,28 @@
+services:
+  redis:
+    image: redis:8
+    container_name: redis-demo-server
+    ports:
+      - "6379:6379"
+    command:
+      - redis-server
+      - --requirepass
+      - redispass
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redispass", "--no-auth-warning", "PING"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    container_name: redis-demo-insight
+    ports:
+      - "5540:5540"
+    depends_on:
+      redis:
+        condition: service_healthy

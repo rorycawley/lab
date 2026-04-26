@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-demo-app
+  namespace: redis-demo
+spec:
+  selector:
+    app: redis-demo-app
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
