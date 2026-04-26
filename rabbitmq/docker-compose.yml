@@ -1,0 +1,36 @@
+services:
+  postgres:
+    image: postgres:18
+    container_name: rabbitmq-demo-postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: taskdb
+      POSTGRES_USER: tasks
+      POSTGRES_PASSWORD: tasks
+    volumes:
+      - pg_data:/var/lib/postgresql
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U tasks -d taskdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:4-management
+    container_name: rabbitmq-demo-broker
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: tasks
+      RABBITMQ_DEFAULT_PASS: tasks
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  pg_data:
