@@ -174,6 +174,12 @@ The cluster must be running. The LGTM stack installs into the `monitoring` names
 ### Install
 
 ```bash
+# One-time per cluster: install Sealed Secrets controller + seal
+# fresh random Grafana/MinIO credentials. Save the printed values to
+# your password manager.
+bb monitoring-seal-secrets
+git add monitoring/secrets/ && git commit -m "Seal monitoring credentials"
+
 bb monitoring-install
 # Takes ~5 minutes, installs 6 Helm releases
 ```
@@ -190,7 +196,7 @@ bb monitoring-status
 ```bash
 bb grafana
 # Port-forwards to http://localhost:3000
-# Login: admin / admin-change-me
+# Login: credentials from your password manager (set by bb monitoring-seal-secrets)
 ```
 
 ### Install Order (and Why It Matters)
@@ -269,7 +275,7 @@ Covered in detail in the OpenTelemetry section above. The short version: the age
 
 ### Quick Tour
 
-After `bb grafana`, open `http://localhost:3000` (login: `admin` / `admin-change-me`).
+After `bb grafana`, open `http://localhost:3000` and log in with the credentials you saved when you ran `bb monitoring-seal-secrets`.
 
 **Explore → Loki** — log search:
 ```
@@ -454,7 +460,8 @@ The agent adds 10-15 seconds to JVM startup. If health probes fire before the ap
 |------|---------|
 | Install monitoring stack | `bb monitoring-install` |
 | Check monitoring pods | `bb monitoring-status` |
-| Open Grafana | `bb grafana` (→ localhost:3000, admin/admin-change-me) |
+| Open Grafana | `bb grafana` (→ localhost:3000; creds in your password manager — set by `bb monitoring-seal-secrets`) |
+| Seal/rotate monitoring credentials | `bb monitoring-seal-secrets` (then commit `monitoring/secrets/` and restart `deploy/grafana`, `deploy/mimir`, `statefulset/minio-mimir`) |
 | Uninstall monitoring | `bb monitoring-uninstall` |
 | Check TLS cert status | `bb cert-status` |
 | Enable tracing | Edit `values-prod.yaml` → `otel.enabled: "true"`, then `bb helm-prod` |

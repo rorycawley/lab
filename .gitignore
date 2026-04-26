@@ -60,6 +60,14 @@ charts/
 *.crt
 secrets/
 
+# Sealed Secrets are encrypted with the cluster's controller key and
+# safe to commit. Whitelist only the encrypted YAMLs + README so any
+# accidental plaintext file in the same directory still stays ignored.
+!hetzner/myapp/monitoring/secrets/
+hetzner/myapp/monitoring/secrets/*
+!hetzner/myapp/monitoring/secrets/*.sealedsecret.yaml
+!hetzner/myapp/monitoring/secrets/README.md
+
 # OS / misc
 Thumbs.db
 .direnv/

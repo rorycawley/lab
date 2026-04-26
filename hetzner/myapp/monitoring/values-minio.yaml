@@ -16,9 +16,10 @@ resources:
   limits:
     memory: 512Mi
 
-# Root credentials — change these for production!
-rootUser: minio
-rootPassword: minio-secret-key-change-me
+# Root credentials — sourced from the Sealed Secret created by
+# monitoring/seal-secrets.sh. The secret must contain rootUser and
+# rootPassword keys.
+existingSecret: minio-root-creds
 
 buckets:
   - name: mimir-data

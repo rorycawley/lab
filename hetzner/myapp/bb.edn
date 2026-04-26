@@ -171,7 +171,6 @@
              (println "cert-manager renews automatically at the RENEWS date.")
              (println "If READY is not True, run: kubectl describe certificate <name>"))}
 
-
   ingress-install
   {:doc  "Install nginx-ingress controller (for clouds without Traefik)"
    :task (do (println "Installing nginx-ingress controller...")
@@ -263,8 +262,12 @@
            (run 'smoke-prod))}
 
   ;; ── Monitoring (LGTM stack) ─────────────────────────────────────
+  monitoring-seal-secrets
+  {:doc  "Install Sealed Secrets controller, generate + seal monitoring credentials (run once per cluster, or to rotate)"
+   :task (shell "bash monitoring/seal-secrets.sh")}
+
   monitoring-install
-  {:doc  "Install full Grafana LGTM stack (Loki + MinIO + Mimir + Tempo + Alloy + Grafana)"
+  {:doc  "Install full Grafana LGTM stack (Loki + MinIO + Mimir + Tempo + Alloy + Grafana). Requires bb monitoring-seal-secrets first."
    :task (shell "bash monitoring/install.sh")}
 
   monitoring-status
@@ -272,16 +275,19 @@
    :task (shell "kubectl get pods -n monitoring")}
 
   monitoring-uninstall
-  {:doc  "Remove entire LGTM stack"
+  {:doc  "Remove entire LGTM stack (keeps sealed-secrets controller and SealedSecret resources for reuse)"
    :task (do (shell {:continue true} "helm uninstall grafana -n monitoring")
              (shell {:continue true} "helm uninstall alloy   -n monitoring")
              (shell {:continue true} "helm uninstall tempo   -n monitoring")
              (shell {:continue true} "helm uninstall loki    -n monitoring")
              (shell {:continue true} "helm uninstall mimir   -n monitoring")
              (shell {:continue true} "helm uninstall minio-mimir -n monitoring")
-             (println "LGTM stack removed."))}
+             (println "LGTM stack removed.")
+             (println "Sealed-secrets controller and SealedSecret resources are kept;")
+             (println "rerun bb monitoring-install to bring the stack back up."))}
 
   grafana
   {:doc  "Port-forward Grafana → http://localhost:3000"
-   :task (do (println "Grafana → http://localhost:3000  (admin / admin-change-me)")
+   :task (do (println "Grafana → http://localhost:3000")
+             (println "Credentials: see your password manager (set by bb monitoring-seal-secrets).")
              (shell "kubectl port-forward -n monitoring svc/grafana 3000:80"))}}}

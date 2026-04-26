@@ -12,9 +12,12 @@ resources:
   limits:
     memory: 256Mi
 
-# Admin credentials — change the password!
-adminUser: admin
-adminPassword: admin-change-me
+# Admin credentials — sourced from the Sealed Secret created by
+# monitoring/seal-secrets.sh. Plaintext values never enter Git.
+admin:
+  existingSecret: grafana-admin-creds
+  userKey: admin-user
+  passwordKey: admin-password
 
 # ── Datasources (auto-configured) ───────────────────────────────
 datasources:

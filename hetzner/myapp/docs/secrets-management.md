@@ -2,6 +2,8 @@
 
 > **Context:** This document is a companion to the main [GUIDE.md](../GUIDE.md). The guide gets you deployed with pragmatic shortcuts suitable for a personal project. This document explains why those shortcuts become problems at scale, and how to evolve toward proper secrets management — from quick fixes to HashiCorp Vault to a fully vendor-agnostic approach using the Kubernetes Secrets Store CSI Driver.
 
+> **Status:** Phase 1 of the evolution path is complete. Monitoring credentials (Grafana admin, MinIO root) have been migrated from inline values files to Sealed Secrets at `monitoring/secrets/`. The remaining items (Hetzner token, kubeconfig, CI auth) still follow the original pragmatic-shortcut model and are candidates for the later phases below.
+
 ---
 
 ## Where Secrets Live Today
@@ -13,18 +15,20 @@ This project has secrets scattered across several locations. Each was chosen for
 | Hetzner API token | `.zshrc` env var, `terraform.tfstate` | Anyone with laptop access | Full cloud infrastructure control |
 | Kubeconfig | `myapp_kubeconfig.yaml` (local file) | Anyone who copies the file | Full cluster admin — deploy, delete, read secrets |
 | GHCR credentials | `gh` CLI token | Anyone with laptop access | Push arbitrary images to your registry |
-| MinIO root password | `monitoring/values-minio.yaml` (in Git) | Anyone who reads the repo or its history | Access to all stored metrics and logs |
-| Grafana admin password | `monitoring/values-grafana.yaml` (in Git) | Same — visible in Git history forever | Modify dashboards, read all monitoring data |
+| MinIO root password | `monitoring/secrets/minio-root-creds.sealedsecret.yaml` (Sealed Secret in Git) — also injected into Mimir via `global.extraEnvFrom` | Anyone with cluster admin (the controller decrypts to a `Secret` in `monitoring`) | Access to stored metrics |
+| Grafana admin password | `monitoring/secrets/grafana-admin-creds.sealedsecret.yaml` (Sealed Secret in Git) | Same | Modify dashboards, read all monitoring data |
 | GitHub Actions KUBE_CONFIG | GitHub encrypted secrets | GitHub Actions runners, repo admins | Full cluster access from CI/CD |
 | GitHub Actions PROD_HOST | GitHub Actions variable (not secret) | Public — visible in workflow logs | Not sensitive, but included for completeness |
 
 **For a personal learning project, this is fine.** You're the only user, the data isn't sensitive, and the cluster costs €30/month. The trade-off between security and simplicity is acceptable.
 
-**For production with real users, it's not.** Two specific problems stand out:
+**For production with real users, the remaining gaps are:**
 
-1. **Passwords in Git.** The MinIO and Grafana passwords are committed to the repository in plain text. Even if you change them later, the old values are in Git history forever. Anyone with read access to the repo — current and future team members, open-source contributors if the repo goes public — can see them.
+1. **Pre-migration passwords are in Git history.** `admin-change-me` and `minio-secret-key-change-me` were committed before the Sealed Secrets migration and are recoverable via `git log`. The seal helper now generates fresh random values, so the leaked defaults no longer match the running cluster — but treat them as burned and never reuse those strings.
 
 2. **Cluster credentials in CI.** The kubeconfig stored as a GitHub Secret (`KUBE_CONFIG`) grants full cluster admin access. This is a pragmatic shortcut — it works and is simple. But it means that if your GitHub account or repository is compromised, the attacker has complete access to your production cluster. Managed Kubernetes services (EKS, AKS, GKE) support stronger patterns like workload identity federation (OIDC), where the CI system authenticates without static credentials. Those are worth adopting when you move to a managed cloud provider.
+
+3. **Sealed Secrets controller key is cluster-scoped.** When the cluster is destroyed and recreated, the existing `*.sealedsecret.yaml` files become unreadable to the new controller. Either back up `kube-system/sealed-secrets-key*` Secrets before destroy, or rerun `bb monitoring-seal-secrets` after the rebuild to generate fresh credentials.
 
 ---
 
@@ -71,6 +75,8 @@ Kubernetes Secrets are the right starting point for simple cases. For anything b
 
 Before investing in Vault, fix the most obvious problem: passwords committed to the repository.
 
+> **Already done in this repo** — the monitoring stack uses Option 2 (Sealed Secrets). The two options below are documented for understanding and for cases where Sealed Secrets isn't available.
+
 ### Option 1: kubectl create secret (manual)
 
 Move the MinIO and Grafana passwords out of the values files and into Kubernetes Secrets:
@@ -103,31 +109,19 @@ Remove the plain-text passwords from the values files and commit the change. The
 
 **Limitation:** someone has to run `kubectl create secret` manually. If the cluster is destroyed and recreated, the secrets are lost — you need to recreate them.
 
-### Option 2: Sealed Secrets (encrypted secrets in Git)
+### Option 2: Sealed Secrets (encrypted secrets in Git) — **in use**
 
 Sealed Secrets solves the "manual recreation" problem. It lets you encrypt secrets with a cluster-specific public key and commit the encrypted version to Git. Only the Sealed Secrets controller running in the cluster can decrypt them.
 
-```bash
-# Install the controller
-helm repo add sealed-secrets https://bitnami-labs.github.io/sealed-secrets
-helm install sealed-secrets sealed-secrets/sealed-secrets -n kube-system
+This repo already wires it up:
 
-# Install the CLI
-brew install kubeseal
-
-# Create a sealed secret
-kubectl create secret generic minio-creds \
-  --namespace monitoring \
-  --from-literal=rootPassword=your-actual-password \
-  --dry-run=client -o yaml \
-  | kubeseal --format yaml > monitoring/sealed-minio-creds.yaml
-```
-
-The output file (`sealed-minio-creds.yaml`) contains encrypted data that's safe to commit to Git. When applied to the cluster, the Sealed Secrets controller decrypts it and creates a regular Kubernetes Secret.
+- `monitoring/seal-secrets.sh` (run via `bb monitoring-seal-secrets`) installs the controller into `kube-system`, generates fresh random passwords, and seals them into `monitoring/secrets/{grafana-admin,minio-root}-creds.sealedsecret.yaml`.
+- `monitoring/install.sh` (run via `bb monitoring-install`) verifies the controller is present, applies the sealed YAMLs, waits for them to materialize as `Secret`s, then installs the LGTM stack pointing at those Secrets via `existingSecret`. Mimir reads the same MinIO Secret as env vars (`global.extraEnvFrom`) and substitutes them into its config via `-config.expand-env=true`, so MinIO and Mimir credentials always stay in sync.
+- The `*.sealedsecret.yaml` files are committed to Git. They're safe — only the controller in the cluster they were sealed for can decrypt them.
 
 **What this gives you:** secrets in Git (for reproducibility) without plain-text values in Git (for security). If the cluster is destroyed and recreated, you install the Sealed Secrets controller, apply the sealed secrets from Git, and everything works.
 
-**Limitation:** the encryption key is cluster-specific. If you lose the cluster's private key (stored as a Secret in the `kube-system` namespace), you can't decrypt the sealed secrets. Back up the key, or accept that you'll need to re-seal secrets after a full cluster rebuild.
+**Limitation:** the encryption key is cluster-specific. If you lose the cluster's private key (stored as a Secret in the `kube-system` namespace), you can't decrypt the sealed secrets. Back up the key (`kubectl get secret -n kube-system -l sealedsecrets.bitnami.com/sealed-secrets-key -o yaml > backup.yaml`), or accept that you'll need to re-seal secrets after a full cluster rebuild — `bb monitoring-seal-secrets` is idempotent and will regenerate the YAMLs against the new controller's key.
 
 ---
 
@@ -446,15 +440,13 @@ If you're on a single cloud and don't need portability, cloud-native secrets man
 
 You don't need Vault on day one. Evolve as the need arises:
 
-| Phase | What you do | What it fixes | Effort |
+| Phase | What you do | What it fixes | Status |
 |-------|------------|---------------|--------|
-| **1. Passwords out of Git** | `kubectl create secret` or Sealed Secrets | Plain-text passwords visible in Git history | 30 minutes |
-| **2. Learn Vault** | Install Vault in dev mode, move MinIO/Grafana passwords | Scattered secrets, no access control | Half a day |
-| **3. Production Vault** | Auto-unseal, HA, audit logging, migrate all secrets | No audit trail, no rotation, no access control | 1-2 days |
-| **4. Dynamic secrets** | Configure Vault database backend for short-lived credentials | Static long-lived database passwords | Half a day |
-| **5. Multi-provider** | Switch to CSI Driver interface | Locked to Vault specifically | 1-2 hours |
-
-Phase 1 is worth doing today. Phase 2 is worth doing when you add a database or a second team member. Phases 3-5 are for production systems with compliance requirements or multi-cloud deployments.
+| **1. Passwords out of Git** | `kubectl create secret` or Sealed Secrets | Plain-text passwords visible in Git history | ✅ Done — Sealed Secrets, see `monitoring/secrets/` |
+| **2. Learn Vault** | Install Vault in dev mode, move MinIO/Grafana passwords | Scattered secrets, no access control | Worth doing when you add a database or a second team member |
+| **3. Production Vault** | Auto-unseal, HA, audit logging, migrate all secrets | No audit trail, no rotation, no access control | For production systems with compliance requirements |
+| **4. Dynamic secrets** | Configure Vault database backend for short-lived credentials | Static long-lived database passwords | After Phase 3 |
+| **5. Multi-provider** | Switch to CSI Driver interface | Locked to Vault specifically | For multi-cloud deployments |
 
 ---
 
@@ -462,7 +454,7 @@ Phase 1 is worth doing today. Phase 2 is worth doing when you add a database or 
 
 Even without Vault, these practices significantly improve your security posture:
 
-**Rotate the leaked passwords.** The MinIO and Grafana passwords that are currently in Git history should be considered compromised. Even after removing them from the values files, the old values are recoverable via `git log`. Change them in the running cluster and never use those values again.
+**Rotate the leaked passwords.** The pre-migration MinIO and Grafana defaults (`minio-secret-key-change-me`, `admin-change-me`) are in Git history forever and recoverable via `git log`. The Sealed Secrets migration replaces them with random values, so the leaked strings no longer match the running cluster — but never reuse those defaults. To rotate again later, run `bb monitoring-seal-secrets` (it overwrites the YAMLs with fresh random values) and restart the affected pods.
 
 **Use imagePullSecrets instead of public images.** Making GHCR packages public (as recommended in the main guide for simplicity) means anyone can pull your container image. For production, keep packages private and configure an `imagePullSecret` in your Helm chart — or use a private registry like Harbor.
 

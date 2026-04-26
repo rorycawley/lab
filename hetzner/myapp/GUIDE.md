@@ -161,6 +161,7 @@ bb tf-destroy → Tears everything down
 - Packer snapshots (MicroOS images — once per Hetzner project, persists forever)
 - DNS A records (once per domain, update only if load balancer IP changes)
 - ClusterIssuer for cert-manager (once per cluster creation — doesn't survive destroy)
+- `bb monitoring-seal-secrets` (once per cluster creation — installs the Sealed Secrets controller and seals fresh Grafana / MinIO credentials)
 - `bb monitoring-install` (once per cluster creation — the LGTM stack)
 
 These are all manual, infrequent, and intentional. They form the "platform layer" that your application runs on.
@@ -1117,7 +1118,7 @@ What's in Git:
 - **CI/CD pipeline** — `.github/workflows/ci.yaml` and `cd.yaml`
 
 What's NOT in Git (deliberately):
-- **Secrets** — `terraform.tfstate` (contains Hetzner token), `myapp_kubeconfig.yaml` (cluster credentials), MinIO passwords. These are stored as GitHub Secrets or local files excluded by `.gitignore`.
+- **Plaintext secrets** — `terraform.tfstate` (Hetzner token), `myapp_kubeconfig.yaml` (cluster credentials). These are stored as GitHub Secrets or local files excluded by `.gitignore`. Monitoring credentials (Grafana, MinIO) live in Git as encrypted Sealed Secrets under `monitoring/secrets/` — only the cluster's controller can decrypt them.
 - **Runtime state** — PersistentVolumeClaims, TLS certificates, MinIO data. These are generated and managed by the cluster.
 
 ### Push-Based vs Pull-Based GitOps
@@ -1175,7 +1176,8 @@ The CI pipeline builds the image and updates the image tag in Git. ArgoCD sees t
 | `bb cert-status` | Show TLS certificate status and expiry |
 | `bb ingress-install` | Install nginx-ingress (for clouds without Traefik) |
 | `bb cert-manager-install` | Install cert-manager (for clouds without it) |
-| `bb monitoring-install` | Install full LGTM stack |
+| `bb monitoring-seal-secrets` | Install Sealed Secrets controller + seal Grafana/MinIO credentials (run once per cluster, or to rotate) |
+| `bb monitoring-install` | Install full LGTM stack (requires `monitoring-seal-secrets` first) |
 | `bb monitoring-status` | Show monitoring pods |
 | `bb monitoring-uninstall` | Remove LGTM stack |
 | `bb grafana` | Port-forward Grafana → localhost:3000 |
@@ -1379,17 +1381,28 @@ The solution: install Loki first (its MinIO gets `minio-sa`), then install stand
 Loki is pinned to chart v6.33.0 and Tempo to v1.10.3 because newer versions have breaking configuration changes.
 
 ```bash
+# One-time per cluster: install the Sealed Secrets controller and seal
+# fresh random credentials for Grafana / MinIO. Save the printed
+# credentials to your password manager — they are not stored in
+# plaintext anywhere else, and the script overwrites them on rerun.
+bb monitoring-seal-secrets
+
+# Commit the encrypted SealedSecret YAMLs (safe — only your cluster
+# can decrypt them).
+git add monitoring/secrets/ && git commit -m "Seal monitoring credentials"
+
 bb monitoring-install
 # Takes ~5 minutes, installs 6 Helm releases into "monitoring" namespace
 
 bb monitoring-status          # verify all pods are running
 bb grafana                    # port-forward → http://localhost:3000
-#                               Login: admin / admin-change-me
+#                               Login with the credentials from your
+#                               password manager.
 ```
 
 ### Using Grafana: A Quick Tour
 
-After `bb grafana`, open `http://localhost:3000` and log in with `admin` / `admin-change-me`.
+After `bb grafana`, open `http://localhost:3000` and log in with the credentials you saved from `bb monitoring-seal-secrets` (or reset them with `kubectl exec -n monitoring deploy/grafana -- grafana-cli admin reset-admin-password '<new>'`).
 
 **Explore → Loki** — log search. Enter `{namespace="default"}` to see all logs from your app's namespace. Add filters: `{namespace="default", app="myapp"} |= "error"` finds log lines containing "error". The query language is LogQL.
 
@@ -1437,10 +1450,24 @@ kubectl get certificate
 # READY should be True, and the AGE tells you when it was last issued
 ```
 
-**Changing credentials before production:**
-- `monitoring/values-minio.yaml` → `rootPassword`
-- `monitoring/values-grafana.yaml` → `adminPassword`
-- `monitoring/values-mimir.yaml` → must match the MinIO password
+**Rotating credentials:**
+
+Grafana and MinIO credentials are no longer in the values files — they are stored in Sealed Secrets at `monitoring/secrets/`. To rotate:
+
+```bash
+bb monitoring-seal-secrets        # generates new passwords + reseals
+git add monitoring/secrets/ && git commit -m "Rotate monitoring creds"
+
+# Restart pods so they pick up the new values
+kubectl rollout restart -n monitoring deploy/grafana deploy/mimir
+kubectl rollout restart -n monitoring statefulset/minio-mimir
+
+# Reset Grafana's admin password (it caches the user in its own DB):
+kubectl exec -n monitoring deploy/grafana -- \
+  grafana-cli admin reset-admin-password '<new-password-from-step-1>'
+```
+
+Mimir reads the same MinIO credentials via env vars (`global.extraEnvFrom`) and the `-config.expand-env=true` flag, so they always stay in sync — no manual matching required.
 
 ### How Alerting Works: From Dashboards to Notifications
 
@@ -1955,9 +1982,10 @@ Time estimate: 1-2 days
 6. Update GitHub Secrets (new kubeconfig, AWS credentials)            ~10 minutes
 7. Update CD workflow with AWS authentication step                    ~20 minutes
 8. Update DNS A records to point to new AWS load balancer             ~5 minutes
-9. Run bb monitoring-install                                          ~5 minutes
-10. Deploy: git push                                                  ~5 minutes
-11. Verify: curl https://myappk8s.net/health                         ~1 minute
+9. Run bb monitoring-seal-secrets (new cluster ⇒ new sealing key)    ~2 minutes
+10. Run bb monitoring-install                                         ~5 minutes
+11. Deploy: git push                                                  ~5 minutes
+12. Verify: curl https://myappk8s.net/health                         ~1 minute
 ```
 
 Your Clojure code doesn't change. Your Dockerfile doesn't change. Your Helm templates don't change. Your CI workflow doesn't change. Your monitoring values files might need minor storage class adjustments. The bulk of the work is writing the Terraform config for the new cloud and adjusting authentication.
@@ -2102,7 +2130,9 @@ bb helm-prod
 kubectl get svc -n ingress-nginx
 # Create a CNAME DNS record pointing to the ELB hostname
 
-# 8. Install monitoring
+# 8. Seal monitoring credentials, then install LGTM stack
+bb monitoring-seal-secrets
+git add monitoring/secrets/ && git commit -m "Seal monitoring credentials"
 bb monitoring-install
 ```
 
@@ -2231,7 +2261,9 @@ bb helm-prod
 kubectl get svc -n ingress-nginx
 # Create A record in DNS
 
-# 7. Install monitoring
+# 7. Seal monitoring credentials, then install LGTM stack
+bb monitoring-seal-secrets
+git add monitoring/secrets/ && git commit -m "Seal monitoring credentials"
 bb monitoring-install
 ```
 
@@ -2353,7 +2385,9 @@ bb helm-prod
 kubectl get svc -n ingress-nginx
 # Create A record in DNS
 
-# 7. Install monitoring
+# 7. Seal monitoring credentials, then install LGTM stack
+bb monitoring-seal-secrets
+git add monitoring/secrets/ && git commit -m "Seal monitoring credentials"
 bb monitoring-install
 ```
 
@@ -2494,7 +2528,9 @@ bb helm-prod
 kubectl get svc -A | grep traefik
 # Create A record in DNS
 
-# 7. Install monitoring
+# 7. Seal monitoring credentials, then install LGTM stack
+bb monitoring-seal-secrets
+git add monitoring/secrets/ && git commit -m "Seal monitoring credentials"
 bb monitoring-install
 ```
 
@@ -2770,11 +2806,11 @@ This project currently stores secrets in several places:
 | Hetzner API token | `.zshrc` env var + `terraform.tfstate` | Laptop compromise exposes cloud access |
 | Kubeconfig | `myapp_kubeconfig.yaml` (local file) | Full cluster admin access if stolen |
 | GHCR credentials | `gh` CLI token | Can push images to your registry |
-| MinIO root password | `monitoring/values-minio.yaml` (in Git) | Anyone who reads the repo has the password |
-| Grafana admin password | `monitoring/values-grafana.yaml` (in Git) | Same — visible in Git history |
+| MinIO root password | `monitoring/secrets/minio-root-creds.sealedsecret.yaml` (Sealed Secret in Git) | Encrypted with the cluster's controller key — only that cluster can decrypt |
+| Grafana admin password | `monitoring/secrets/grafana-admin-creds.sealedsecret.yaml` (Sealed Secret in Git) | Same — encrypted, safe to commit |
 | GitHub Actions secrets | GitHub's encrypted secrets store | Reasonable, but GitHub-specific |
 
-For a personal learning project, this is fine. For a production system with real users and real data, it's not. The MinIO and Grafana passwords are in Git — anyone who has read access to the repo (or its history) can see them. The Hetzner token in your shell profile means anyone with access to your laptop has access to your cloud infrastructure. The kubeconfig grants full cluster admin — if someone copies that file, they own your cluster.
+For a personal learning project, this is fine. For a production system with real users and real data, it's not. The remaining plaintext exposures are: the Hetzner token in your shell profile means anyone with access to your laptop has access to your cloud infrastructure, and the kubeconfig grants full cluster admin — if someone copies that file, they own your cluster. The monitoring credentials are no longer in plaintext anywhere in Git, but the older `admin-change-me` / `minio-secret-key-change-me` defaults remain in pre-migration commits and must be considered burned (the seal helper generates fresh random values).
 
 ### What a Secrets Manager Solves
 
@@ -3035,7 +3071,7 @@ These aren't technical decisions — they're business decisions. An internal too
 | TLS certificates | HTTPS encryption | Browser warnings until re-issued | cert-manager re-issues automatically on redeploy |
 | Database (if added later) | User data, transactions | Data loss — the critical concern | Database-specific backup + replication |
 
-The good news: this project is largely stateless. The application serves HTTP responses and doesn't store user data. The most critical things are already in Git (code, Helm charts, CI/CD pipelines). If you lose the entire cluster, you can rebuild from scratch in about 15 minutes — `bb tf-apply`, `bb cluster-issuer`, `bb monitoring-install`, `bb helm-prod`. Your RPO for the application itself is effectively zero (no data to lose). Your RTO is ~15 minutes (cluster provisioning time).
+The good news: this project is largely stateless. The application serves HTTP responses and doesn't store user data. The most critical things are already in Git (code, Helm charts, CI/CD pipelines). If you lose the entire cluster, you can rebuild from scratch in about 15 minutes — `bb tf-apply`, `bb cluster-issuer`, `bb monitoring-seal-secrets`, `bb monitoring-install`, `bb helm-prod`. Your RPO for the application itself is effectively zero (no data to lose). Your RTO is ~15 minutes (cluster provisioning time).
 
 The picture changes dramatically when you add a database. At that point, your RPO and RTO depend on your database backup strategy, not your Kubernetes setup.
 
@@ -3060,6 +3096,8 @@ Because everything is Infrastructure as Code, your cluster is disposable and reb
 bb tf-apply                    # recreate cluster (~5 min)
 bb tf-kubeconfig               # get new kubeconfig
 bb cluster-issuer              # recreate ClusterIssuer
+bb monitoring-seal-secrets     # new cluster ⇒ new sealing key, reseal credentials
+git add monitoring/secrets/ && git commit -m "Reseal monitoring creds for rebuilt cluster"
 bb monitoring-install          # reinstall LGTM stack
 bb helm-prod                   # deploy app
 # Wait for TLS certificate (~1 min)
@@ -3429,7 +3467,7 @@ The only scenario with real downtime is a full cluster destroy and recreate — 
 
 **Install order matters.** Loki first (claims `minio-sa`), then standalone MinIO as `mimir-minio-sa`. If you see a ServiceAccount conflict, run `bb monitoring-uninstall` then `bb monitoring-install`. See Step 9 for details.
 
-**Grafana:** access via `bb grafana` (port-forward). Login: `admin` / `admin-change-me`.
+**Grafana:** access via `bb grafana` (port-forward). Login: credentials from your password manager (set when you ran `bb monitoring-seal-secrets`).
 
 ### Debugging Checklist
 

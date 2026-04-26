@@ -4,6 +4,14 @@
 
 deploymentMode: monolithic
 
+# MinIO credentials are injected as env vars from the minio-root-creds
+# Sealed Secret (created by monitoring/seal-secrets.sh) and substituted
+# into the config below via Mimir's `-config.expand-env=true` flag.
+global:
+  extraEnvFrom:
+    - secretRef:
+        name: minio-root-creds
+
 mimir:
   structuredConfig:
     common:
@@ -12,8 +20,8 @@ mimir:
         s3:
           endpoint: minio-mimir.monitoring.svc:9000
           bucket_name: mimir-data
-          access_key_id: minio
-          secret_access_key: minio-secret-key-change-me
+          access_key_id: ${rootUser}
+          secret_access_key: ${rootPassword}
           insecure: true
 
     blocks_storage:
@@ -31,6 +39,10 @@ minio:
 
 monolithic:
   replicas: 1
+  # -config.expand-env=true makes Mimir substitute ${VAR} references in
+  # the structured config from the env vars injected by global.extraEnvFrom.
+  extraArgs:
+    config.expand-env: "true"
   resources:
     requests:
       cpu: 100m

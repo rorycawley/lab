@@ -1,0 +1,59 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: task-event-sourcing-api
+  namespace: event-sourcing-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: task-event-sourcing-api
+  template:
+    metadata:
+      labels:
+        app: task-event-sourcing-api
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: task-event-sourcing-api:demo
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: EVENT_STORE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: task-db-secret
+                  key: event_store_database_url
+            - name: READ_STORE_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: task-db-secret
+                  key: read_store_database_url
+          startupProbe:
+            httpGet:
+              path: /db-healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10

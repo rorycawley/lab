@@ -15,6 +15,7 @@ set -euo pipefail
 
 NAMESPACE=monitoring
 DIR="$(cd "$(dirname "$0")" && pwd)"
+SEALED_DIR="${DIR}/secrets"
 
 echo "==> Adding Helm repos..."
 helm repo add grafana https://grafana.github.io/helm-charts
@@ -23,6 +24,41 @@ helm repo update
 
 echo "==> Creating namespace: ${NAMESPACE}"
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -
+
+# ── Apply sealed secrets ───────────────────────────────────────────
+# Grafana, MinIO, and Mimir all read their credentials from K8s
+# Secrets that the Sealed Secrets controller materializes from the
+# encrypted YAMLs in monitoring/secrets/. Run `bb monitoring-seal-secrets`
+# to (re)generate them.
+if ! ls "${SEALED_DIR}"/*.sealedsecret.yaml >/dev/null 2>&1; then
+  echo ""
+  echo "✗ No sealed secrets found in ${SEALED_DIR}/"
+  echo "  Run this once to generate and seal credentials:"
+  echo "    bb monitoring-seal-secrets"
+  exit 1
+fi
+
+if ! kubectl get deployment sealed-secrets -n kube-system >/dev/null 2>&1; then
+  echo ""
+  echo "✗ Sealed Secrets controller is not installed."
+  echo "  Run: bb monitoring-seal-secrets   (it installs the controller too)"
+  exit 1
+fi
+
+echo "==> Applying sealed secrets..."
+kubectl apply -n "${NAMESPACE}" -f "${SEALED_DIR}/"
+
+echo "==> Waiting for the controller to materialize Secrets..."
+for name in grafana-admin-creds minio-root-creds; do
+  for i in $(seq 1 30); do
+    if kubectl get secret "${name}" -n "${NAMESPACE}" >/dev/null 2>&1; then
+      echo "    ✓ ${name}"
+      break
+    fi
+    [ "${i}" = "30" ] && { echo "    ✗ ${name} did not materialize in 30s"; exit 1; }
+    sleep 1
+  done
+done
 
 echo ""
 echo "==> [1/6] Installing Loki (logs)..."
@@ -79,7 +115,11 @@ echo "  LGTM stack installed!"
 echo ""
 echo "  Access Grafana:"
 echo "    bb grafana"
-echo "    → http://localhost:3000  (admin / admin-change-me)"
+echo "    → http://localhost:3000"
+echo "    Credentials are in your password manager (set when you ran"
+echo "    bb monitoring-seal-secrets) or can be reset via:"
+echo "      kubectl exec -n monitoring deploy/grafana -- \\"
+echo "        grafana-cli admin reset-admin-password '<new>'"
 echo ""
 echo "  Datasources pre-configured:"
 echo "    • Mimir  → metrics (Prometheus-compatible)"

@@ -1,34 +1,34 @@
 services:
   event-postgres:
     image: postgres:18
-    container_name: registry-event-postgres
+    container_name: event-sourcing-event-postgres
     ports:
       - "5432:5432"
     environment:
-      POSTGRES_DB: registry_events
-      POSTGRES_USER: registry
-      POSTGRES_PASSWORD: registry
+      POSTGRES_DB: task_events
+      POSTGRES_USER: tasks
+      POSTGRES_PASSWORD: tasks
     volumes:
       - event_pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U registry -d registry_events"]
+      test: ["CMD-SHELL", "pg_isready -U tasks -d task_events"]
       interval: 5s
       timeout: 5s
       retries: 20
 
   read-postgres:
     image: postgres:18
-    container_name: registry-read-postgres
+    container_name: event-sourcing-read-postgres
     ports:
       - "5433:5432"
     environment:
-      POSTGRES_DB: registry_read
-      POSTGRES_USER: registry
-      POSTGRES_PASSWORD: registry
+      POSTGRES_DB: task_read
+      POSTGRES_USER: tasks
+      POSTGRES_PASSWORD: tasks
     volumes:
       - read_pgdata:/var/lib/postgresql
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U registry -d registry_read"]
+      test: ["CMD-SHELL", "pg_isready -U tasks -d task_read"]
       interval: 5s
       timeout: 5s
       retries: 20

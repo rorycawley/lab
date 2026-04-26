@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: task-event-sourcing-api
+  namespace: event-sourcing-demo
+spec:
+  selector:
+    app: task-event-sourcing-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

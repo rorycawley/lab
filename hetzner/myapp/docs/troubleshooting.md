@@ -20,7 +20,7 @@ The Events section at the bottom of `bb k8s-describe` output almost always ident
 For Grafana-based debugging (production, after monitoring is installed):
 
 ```bash
-bb grafana            # Open Grafana → http://localhost:3000 (admin / admin-change-me)
+bb grafana            # Open Grafana → http://localhost:3000 (creds set by bb monitoring-seal-secrets)
 ```
 
 Then: **Explore → Loki** for logs, **Explore → Mimir** for metrics, **Explore → Tempo** for traces.
