@@ -1,0 +1,81 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: keycloak-oidc-demo-app
+  namespace: keycloak-oidc-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: keycloak-oidc-demo-app
+  template:
+    metadata:
+      labels:
+        app: keycloak-oidc-demo-app
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: api
+          image: keycloak-oidc-demo-app:demo
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            # The URL the user's browser uses for Keycloak. Issuer of
+            # any token will match this.
+            - name: OIDC_FRONTCHANNEL_BASE
+              value: http://localhost:8180/realms/poc
+            # The URL the BFF uses from inside Kubernetes. ExternalName
+            # service in this namespace points at host.rancher-desktop.internal.
+            - name: OIDC_BACKCHANNEL_BASE
+              value: http://external-keycloak:8180/realms/poc
+            - name: OIDC_REDIRECT_URI
+              value: http://localhost:8080/callback
+            - name: OIDC_POST_LOGOUT_REDIRECT_URI
+              value: http://localhost:8080/
+            - name: PG_HOST
+              value: external-postgres
+            - name: PG_PORT
+              value: "5432"
+            - name: PG_DATABASE
+              value: pocdb
+            - name: PG_USER
+              value: bffapp
+            - name: PG_PASSWORD
+              value: bffpass
+            - name: OIDC_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: oidc-client
+                  key: client_id
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: oidc-client
+                  key: client_secret
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 10
