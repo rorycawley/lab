@@ -1,0 +1,103 @@
+mimir:
+  structuredConfig:
+    blocks_storage:
+      backend: s3
+      bucket_store:
+        sync_dir: /data/tsdb-sync
+      s3:
+        endpoint: alarik-minio.grafana-lgtm-demo.svc:9000
+        bucket_name: mimir-blocks
+        access_key_id: admin
+        secret_access_key: alarik123
+        insecure: true
+      tsdb:
+        dir: /data/tsdb
+    alertmanager_storage:
+      backend: s3
+      s3:
+        endpoint: alarik-minio.grafana-lgtm-demo.svc:9000
+        bucket_name: mimir-alertmanager
+        access_key_id: admin
+        secret_access_key: alarik123
+        insecure: true
+    ruler_storage:
+      backend: s3
+      s3:
+        endpoint: alarik-minio.grafana-lgtm-demo.svc:9000
+        bucket_name: mimir-ruler
+        access_key_id: admin
+        secret_access_key: alarik123
+        insecure: true
+    limits:
+      native_histograms_ingestion_enabled: true
+      max_global_exemplars_per_user: 100000
+    ingester:
+      ring:
+        replication_factor: 1
+
+minio:
+  enabled: false
+
+alertmanager:
+  enabled: false
+  replicas: 1
+  zoneAwareReplication:
+    enabled: false
+
+distributor:
+  replicas: 1
+
+ingester:
+  replicas: 1
+  zoneAwareReplication:
+    enabled: false
+  persistentVolume:
+    size: 2Gi
+
+querier:
+  replicas: 1
+
+query_frontend:
+  replicas: 1
+
+query_scheduler:
+  replicas: 1
+
+store_gateway:
+  replicas: 1
+  zoneAwareReplication:
+    enabled: false
+  persistentVolume:
+    size: 2Gi
+
+compactor:
+  replicas: 1
+  persistentVolume:
+    size: 2Gi
+
+ruler:
+  enabled: false
+  replicas: 1
+
+nginx:
+  replicas: 1
+
+gateway:
+  enabledNonEnterprise: false
+
+"chunks-cache":
+  enabled: false
+"index-cache":
+  enabled: false
+"metadata-cache":
+  enabled: false
+"results-cache":
+  enabled: false
+
+metaMonitoring:
+  dashboards:
+    enabled: false
+  serviceMonitor:
+    enabled: false
+  prometheusRule:
+    enabled: false

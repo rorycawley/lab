@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LGTM Frontend Demo</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="status-bar" aria-label="Service status">
+        <div>
+          <p class="eyebrow">Browser telemetry</p>
+          <h1>LGTM Frontend Demo</h1>
+        </div>
+        <div class="status-pill" id="status">Ready</div>
+      </section>
+
+      <section class="workspace" aria-label="Demo controls">
+        <div class="panel actions">
+          <h2>Actions</h2>
+          <div class="button-grid">
+            <button id="workButton" type="button">Run Work</button>
+            <button id="checkoutButton" type="button">Checkout</button>
+            <button id="errorButton" type="button">Trigger Error</button>
+            <button id="jsErrorButton" type="button">JS Error</button>
+          </div>
+        </div>
+
+        <div class="panel result">
+          <h2>Latest Response</h2>
+          <pre id="output">Click an action to emit frontend logs, metrics, and correlated traces.</pre>
+        </div>
+
+        <div class="panel vitals">
+          <h2>Web Vitals</h2>
+          <dl>
+            <div><dt>FCP</dt><dd id="fcp">-</dd></div>
+            <div><dt>LCP</dt><dd id="lcp">-</dd></div>
+            <div><dt>CLS</dt><dd id="cls">-</dd></div>
+            <div><dt>INP</dt><dd id="inp">-</dd></div>
+            <div><dt>TTFB</dt><dd id="ttfb">-</dd></div>
+          </dl>
+        </div>
+
+        <div class="panel log">
+          <h2>Browser Events</h2>
+          <ol id="eventLog"></ol>
+        </div>
+      </section>
+    </main>
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

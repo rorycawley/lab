@@ -6,7 +6,6 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY main.py .
-COPY static ./static
 
 RUN useradd --system --uid 10001 --no-create-home app \
     && chown -R app:app /app

@@ -1,0 +1,45 @@
+tempo:
+  storage:
+    trace:
+      backend: s3
+      s3:
+        endpoint: alarik-minio.grafana-lgtm-demo.svc.cluster.local:9000
+        bucket: tempo-blocks
+        access_key: admin
+        secret_key: alarik123
+        insecure: true
+        forcepathstyle: true
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+  retention: 24h
+  reportingEnabled: false
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: "http://mimir-nginx.grafana-lgtm-demo.svc/api/v1/push"
+    processor:
+      local_blocks:
+        flush_to_storage: true
+  overrides:
+    defaults:
+      metrics_generator:
+        processors:
+          - service-graphs
+          - span-metrics
+          - local-blocks
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi
+
+service:
+  type: ClusterIP
+
+persistence:
+  enabled: false
