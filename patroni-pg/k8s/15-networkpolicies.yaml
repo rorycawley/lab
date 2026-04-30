@@ -1,0 +1,256 @@
+# Phase 12 NetworkPolicies.
+#
+# Default-deny ingress and egress in the `demo` and `vault` namespaces, then
+# explicitly allow only the contracted flows from Phase 0:
+#   demo/demo-app   -> vault/vault:8200
+#   demo/demo-app   -> database/postgres:5432
+#   vault/vault     -> database/postgres:5432
+#
+# PostgreSQL runs in Docker Compose on `host.rancher-desktop.internal`, outside
+# the cluster. NetworkPolicy cannot select a host endpoint by namespace or pod,
+# so egress to Postgres is expressed as TCP/5432 to an ipBlock and is restricted
+# to the pods that legitimately need it (the Python app and Vault).
+#
+# DNS to kube-system is allowed for every Pod so that denied-case tests prove
+# connections fail at L4, not because name resolution failed.
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: demo
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: demo
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Demo Pods that participate in this demo (Python app and the Phase 7 smoke Pod
+# both carry the part-of label) may reach the Vault Service on TCP/8200.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: demo-egress-vault
+  namespace: demo
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: vault-postgres-security-demo
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: vault
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+      ports:
+        - protocol: TCP
+          port: 8200
+---
+# Only the Python app may reach PostgreSQL on TCP/5432. Postgres is on the
+# host, so the destination is an ipBlock. Link-local metadata addresses are
+# excluded so a compromised app cannot reach cloud instance metadata services.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: demo-egress-postgres
+  namespace: demo
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: python-postgres-demo
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 5432
+---
+# Kubelet liveness and readiness probes hit the Python app on TCP/8080 from the
+# node's host network. NetworkPolicy cannot select kubelet, so we accept ingress
+# on 8080 from any source. /healthz is non-sensitive and does not expose secrets.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: app-ingress-http
+  namespace: demo
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: python-postgres-demo
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-all
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Ingress
+    - Egress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-dns
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  podSelector: {}
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: UDP
+          port: 53
+        - protocol: TCP
+          port: 53
+---
+# Demo Pods labeled with the demo's part-of label may reach Vault on TCP/8200.
+# Other ingress to Vault is denied.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vault-ingress-demo
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: demo
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/part-of: vault-postgres-security-demo
+      ports:
+        - protocol: TCP
+          port: 8200
+---
+# Vault egress: PostgreSQL on the host (database secrets engine) and the
+# Kubernetes API server (TokenReview for Kubernetes auth). The API server
+# address varies by distribution, so TCP/443 and TCP/6443 are allowed to any IP.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vault-egress-apiserver-and-postgres
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  policyTypes:
+    - Egress
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443
+        - protocol: TCP
+          port: 5432
+---
+# Vault Agent Injector receives admission webhook calls from the Kubernetes API
+# server on TCP/8443 and reads cluster state on TCP/443 / TCP/6443. The API
+# server's source IP varies, so ingress on 8443 is allowed from any IP. A
+# hardened cluster should narrow this to the API server's egress range.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: vault-injector-webhook
+  namespace: vault
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: vault-agent-injector
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+      ports:
+        - protocol: TCP
+          port: 8443
+  egress:
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except:
+              - 169.254.0.0/16
+      ports:
+        - protocol: TCP
+          port: 443
+        - protocol: TCP
+          port: 6443

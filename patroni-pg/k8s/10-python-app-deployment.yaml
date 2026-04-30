@@ -1,0 +1,112 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-postgres-demo
+  namespace: demo
+  labels:
+    app.kubernetes.io/name: python-postgres-demo
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: python-postgres-demo
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: python-postgres-demo
+        app.kubernetes.io/part-of: vault-postgres-security-demo
+      annotations:
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/role: "demo-app"
+        vault.hashicorp.com/service: "https://vault.vault.svc.cluster.local:8200"
+        vault.hashicorp.com/tls-secret: "vault-ca"
+        vault.hashicorp.com/ca-cert: "/vault/tls/ca.crt"
+        vault.hashicorp.com/tls-server-name: "vault.vault.svc.cluster.local"
+        vault.hashicorp.com/agent-inject-secret-db-creds: "database/creds/demo-app-runtime"
+        vault.hashicorp.com/agent-inject-template-db-creds: |
+          {{- with secret "database/creds/demo-app-runtime" -}}
+          DB_USERNAME={{ .Data.username }}
+          DB_PASSWORD={{ .Data.password }}
+          {{- end }}
+        vault.hashicorp.com/agent-inject-perms-db-creds: "0400"
+        vault.hashicorp.com/agent-set-security-context: "true"
+        vault.hashicorp.com/agent-run-as-same-user: "true"
+    spec:
+      serviceAccountName: demo-app
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: postgres-ca
+          configMap:
+            name: postgres-ca
+        - name: tmp
+          emptyDir: {}
+      containers:
+        - name: app
+          image: python-postgres-vault-demo:phase8
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: DB_HOST
+              value: host.rancher-desktop.internal
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_NAME
+              value: demo_registry
+            - name: DB_CREDS_FILE
+              value: /vault/secrets/db-creds
+            - name: DB_SSLMODE
+              value: verify-full
+            - name: DB_SSLROOTCERT
+              value: /etc/postgres-ca/ca.crt
+            - name: DB_POOL_MIN_SIZE
+              value: "1"
+            - name: DB_POOL_MAX_SIZE
+              value: "4"
+            - name: DB_POOL_MAX_LIFETIME
+              value: "600"
+          volumeMounts:
+            - name: postgres-ca
+              mountPath: /etc/postgres-ca
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 20
+            periodSeconds: 10

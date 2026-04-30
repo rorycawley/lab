@@ -1,0 +1,160 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vault
+  namespace: vault
+  labels:
+    app.kubernetes.io/name: vault
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: vault
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: vault
+        app.kubernetes.io/part-of: vault-postgres-security-demo
+    spec:
+      serviceAccountName: vault-auth
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      volumes:
+        - name: vault-tls
+          secret:
+            secretName: vault-tls
+        - name: vault-tls-proxy-config
+          configMap:
+            name: vault-tls-proxy
+        - name: postgres-ca
+          configMap:
+            name: postgres-ca
+        - name: vault-home
+          emptyDir: {}
+        - name: vault-logs
+          emptyDir: {}
+        - name: vault-audit
+          emptyDir: {}
+        - name: nginx-tmp
+          emptyDir: {}
+      containers:
+        - name: vault
+          image: hashicorp/vault:1.17.6
+          imagePullPolicy: IfNotPresent
+          command:
+            - sh
+            - -ec
+            - |
+              exec vault server \
+                -dev \
+                -dev-listen-address=127.0.0.1:8201 \
+                -dev-root-token-id="$VAULT_DEV_ROOT_TOKEN_ID"
+          env:
+            - name: VAULT_ADDR
+              value: http://127.0.0.1:8201
+            - name: VAULT_DEV_ROOT_TOKEN_ID
+              valueFrom:
+                secretKeyRef:
+                  name: vault-dev-root-token
+                  key: token
+            - name: VAULT_DISABLE_MLOCK
+              value: "true"
+            - name: HOME
+              value: /home/vault
+          volumeMounts:
+            - name: vault-tls
+              mountPath: /vault/tls
+              readOnly: true
+            - name: postgres-ca
+              mountPath: /vault/postgres-ca
+              readOnly: true
+            - name: vault-home
+              mountPath: /home/vault
+            - name: vault-logs
+              mountPath: /vault/logs
+            - name: vault-audit
+              mountPath: /vault/audit
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 100
+            runAsGroup: 1000
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command:
+                - vault
+                - status
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - vault
+                - status
+            initialDelaySeconds: 20
+            periodSeconds: 10
+        - name: tls-proxy
+          image: nginxinc/nginx-unprivileged:1.27-alpine
+          imagePullPolicy: IfNotPresent
+          args:
+            - nginx
+            - -g
+            - daemon off;
+            - -c
+            - /etc/nginx/nginx.conf
+          ports:
+            - name: https
+              containerPort: 8200
+          volumeMounts:
+            - name: vault-tls
+              mountPath: /vault/tls
+              readOnly: true
+            - name: vault-tls-proxy-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+              readOnly: true
+            - name: nginx-tmp
+              mountPath: /tmp
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 101
+            runAsGroup: 101
+            capabilities:
+              drop:
+                - ALL
+            seccompProfile:
+              type: RuntimeDefault
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 64Mi
+          readinessProbe:
+            tcpSocket:
+              port: https
+            initialDelaySeconds: 5
+            periodSeconds: 5

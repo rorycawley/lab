@@ -1,24 +1,34 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-kubectl apply -f k8s/00-namespaces.yaml
-
 random_password() {
   openssl rand -hex 24
 }
 
-if ! kubectl get secret postgres-bootstrap --namespace database >/dev/null 2>&1; then
-  kubectl create secret generic postgres-bootstrap \
-    --namespace database \
-    --from-literal=POSTGRES_PASSWORD="$(random_password)" \
-    --from-literal=PHASE2_APP_PASSWORD="$(random_password)" \
-    --from-literal=PHASE2_MIGRATION_PASSWORD="$(random_password)"
+mkdir -p .runtime
+
+if [[ ! -f .runtime/postgres.env ]]; then
+  {
+    printf 'POSTGRES_PASSWORD=%s\n' "$(random_password)"
+    printf 'PHASE2_APP_PASSWORD=%s\n' "$(random_password)"
+    printf 'PHASE2_MIGRATION_PASSWORD=%s\n' "$(random_password)"
+  } > .runtime/postgres.env
+  chmod 0600 .runtime/postgres.env
 fi
 
-kubectl apply -f k8s/03-postgres-init-configmap.yaml
-kubectl apply -f k8s/04-postgres-service.yaml
-kubectl apply -f k8s/05-postgres-statefulset.yaml
+set -a
+source .runtime/postgres.env
+set +a
 
-kubectl rollout status statefulset/postgres --namespace database --timeout=180s
+docker compose --env-file .runtime/postgres.env up -d postgres
 
-echo "Phase 2 PostgreSQL foundation applied."
+for _ in {1..60}; do
+  if docker compose --env-file .runtime/postgres.env exec -T postgres pg_isready -U postgres >/dev/null 2>&1; then
+    echo "Phase 2 PostgreSQL foundation applied."
+    exit 0
+  fi
+  sleep 2
+done
+
+echo "error: PostgreSQL did not become ready"
+exit 1

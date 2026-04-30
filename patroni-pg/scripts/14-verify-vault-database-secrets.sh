@@ -1,27 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-db_namespace="database"
-db_pod="postgres-0"
 vault_namespace="vault"
-vault_pod="vault-0"
 root_token="$(kubectl get secret vault-dev-root-token --namespace "$vault_namespace" -o jsonpath='{.data.token}' | base64 --decode)"
+vault_pod="$(kubectl get pod --namespace "$vault_namespace" -l app.kubernetes.io/name=vault --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
 
 vault_root() {
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN="$root_token" "$@"
+  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN="$root_token" "$@"
 }
 
 login_token() {
   local role="$1"
   local jwt="$2"
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8200 \
+  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8201 \
     vault write -field=token "auth/kubernetes/login" role="$role" jwt="$jwt"
 }
 
 vault_read_json() {
   local token="$1"
   local path="$2"
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN="$token" \
+  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN="$token" \
     vault read -format=json "$path"
 }
 
@@ -34,7 +32,10 @@ psql_as() {
   local user="$1"
   local password="$2"
   local sql="$3"
-  kubectl exec --namespace "$db_namespace" "$db_pod" -- env PGPASSWORD="$password" \
+  docker compose --env-file .runtime/postgres.env exec -T postgres env \
+    PGPASSWORD="$password" \
+    PGSSLMODE=verify-full \
+    PGSSLROOTCERT=/tls/postgres/ca.crt \
     psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$user" -d demo_registry -Atc "$sql"
 }
 
@@ -72,7 +73,8 @@ expect_vault_read_failure() {
   echo "ok: $label cannot read $path"
 }
 
-vault_root vault secrets list -format=json | grep -q '"database/"'
+vault_root vault secrets list -format=json >/tmp/phase6-secrets-list.json
+grep -q '"database/"' /tmp/phase6-secrets-list.json
 vault_root vault read database/config/demo-postgres >/dev/null
 vault_root vault read database/roles/demo-app-runtime >/dev/null
 vault_root vault read database/roles/demo-app-migrate >/dev/null

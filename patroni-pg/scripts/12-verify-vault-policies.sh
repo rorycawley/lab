@@ -2,24 +2,24 @@
 set -euo pipefail
 
 vault_namespace="vault"
-vault_pod="vault-0"
 root_token="$(kubectl get secret vault-dev-root-token --namespace "$vault_namespace" -o jsonpath='{.data.token}' | base64 --decode)"
+vault_pod="$(kubectl get pod --namespace "$vault_namespace" -l app.kubernetes.io/name=vault --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
 
 vault_root() {
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN="$root_token" "$@"
+  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN="$root_token" "$@"
 }
 
 login_token() {
   local role="$1"
   local jwt="$2"
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8200 \
+  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8201 \
     vault write -field=token "auth/kubernetes/login" role="$role" jwt="$jwt"
 }
 
 capabilities() {
   local token="$1"
   local path="$2"
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN="$token" \
+  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN="$token" \
     vault token capabilities "$path"
 }
 
@@ -44,7 +44,7 @@ expect_read_denied() {
   local token="$2"
   local path="$3"
 
-  if kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN="$token" \
+  if kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN="$token" \
     vault read "$path" >/tmp/phase5-read.out 2>/tmp/phase5-read.err; then
     echo "error: $label unexpectedly read $path"
     cat /tmp/phase5-read.out

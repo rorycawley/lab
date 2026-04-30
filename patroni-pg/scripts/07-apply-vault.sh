@@ -11,8 +11,9 @@ if ! kubectl get secret vault-dev-root-token --namespace vault >/dev/null 2>&1; 
 fi
 
 kubectl apply -f k8s/06-vault-service.yaml
-kubectl apply -f k8s/07-vault-statefulset.yaml
+kubectl apply -f k8s/14-vault-tls-proxy-configmap.yaml
+kubectl apply -f k8s/07-vault-deployment.yaml
 
-kubectl rollout status statefulset/vault --namespace vault --timeout=180s
+kubectl rollout status deployment/vault --namespace vault --timeout=180s
 
 echo "Phase 3 dev-mode Vault foundation applied."

@@ -1,21 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-namespace="database"
-pod="postgres-0"
 db="demo_registry"
 app_user="phase2_app_user"
 migration_user="phase2_migration_user"
 
-app_password="$(kubectl get secret postgres-bootstrap --namespace "$namespace" -o jsonpath='{.data.PHASE2_APP_PASSWORD}' | base64 --decode)"
-migration_password="$(kubectl get secret postgres-bootstrap --namespace "$namespace" -o jsonpath='{.data.PHASE2_MIGRATION_PASSWORD}' | base64 --decode)"
+set -a
+source .runtime/postgres.env
+set +a
+
+app_password="$PHASE2_APP_PASSWORD"
+migration_password="$PHASE2_MIGRATION_PASSWORD"
 
 psql_as() {
   local user="$1"
   local password="$2"
   local sql="$3"
 
-  kubectl exec --namespace "$namespace" "$pod" -- env PGPASSWORD="$password" \
+  docker compose --env-file .runtime/postgres.env exec -T postgres env \
+    PGPASSWORD="$password" \
+    PGSSLMODE=verify-full \
+    PGSSLROOTCERT=/tls/postgres/ca.crt \
     psql -v ON_ERROR_STOP=1 -h 127.0.0.1 -U "$user" -d "$db" -Atc "$sql"
 }
 
@@ -44,8 +49,7 @@ expect_failure() {
   echo "ok: $label denied"
 }
 
-kubectl get service postgres --namespace "$namespace" >/dev/null
-kubectl exec --namespace "$namespace" "$pod" -- pg_isready -U postgres >/dev/null
+docker compose --env-file .runtime/postgres.env exec -T postgres pg_isready -U postgres >/dev/null
 echo "ok: PostgreSQL is running and ready"
 
 expect_success "app_runtime can INSERT" "$app_user" "$app_password" \

@@ -11,7 +11,6 @@ spec:
   selector:
     app.kubernetes.io/name: vault
   ports:
-    - name: http
+    - name: https
       port: 8200
-      targetPort: http
-
+      targetPort: https

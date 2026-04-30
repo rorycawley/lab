@@ -1,29 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-db_namespace="database"
-db_pod="postgres-0"
 vault_namespace="vault"
-vault_pod="vault-0"
 vault_token="$(kubectl get secret vault-dev-root-token --namespace "$vault_namespace" -o jsonpath='{.data.token}' | base64 --decode)"
+vault_pod="$(kubectl get pod --namespace "$vault_namespace" -l app.kubernetes.io/name=vault --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
 
 random_password() {
   openssl rand -hex 24
 }
 
 vault_exec() {
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN="$vault_token" "$@"
+  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN="$vault_token" "$@"
 }
 
-if ! kubectl get secret vault-postgres-admin --namespace "$db_namespace" >/dev/null 2>&1; then
-  kubectl create secret generic vault-postgres-admin \
-    --namespace "$db_namespace" \
-    --from-literal=password="$(random_password)"
+mkdir -p .runtime
+
+if [[ ! -f .runtime/vault-postgres.env ]]; then
+  printf 'VAULT_POSTGRES_PASSWORD=%s\n' "$(random_password)" > .runtime/vault-postgres.env
+  chmod 0600 .runtime/vault-postgres.env
 fi
 
-vault_db_password="$(kubectl get secret vault-postgres-admin --namespace "$db_namespace" -o jsonpath='{.data.password}' | base64 --decode)"
+set -a
+source .runtime/vault-postgres.env
+set +a
 
-kubectl exec --namespace "$db_namespace" -i "$db_pod" -- env VAULT_DB_PASSWORD="$vault_db_password" \
+vault_db_password="$VAULT_POSTGRES_PASSWORD"
+
+docker compose --env-file .runtime/postgres.env exec -T postgres env VAULT_DB_PASSWORD="$vault_db_password" \
   psql -v ON_ERROR_STOP=1 -v vault_db_password="$vault_db_password" -U postgres -d demo_registry <<'SQL' >/dev/null
 DO $$
 BEGIN
@@ -46,7 +49,7 @@ fi
 vault_exec vault write database/config/demo-postgres \
   plugin_name=postgresql-database-plugin \
   allowed_roles=demo-app-runtime,demo-app-migrate \
-  connection_url='postgresql://{{username}}:{{password}}@postgres.database.svc.cluster.local:5432/demo_registry?sslmode=disable' \
+  connection_url='postgresql://{{username}}:{{password}}@host.rancher-desktop.internal:5432/demo_registry?sslmode=verify-full&sslrootcert=/vault/postgres-ca/ca.crt' \
   username=vault_admin \
   password="$vault_db_password" >/dev/null
 
@@ -55,13 +58,13 @@ vault_exec vault write database/roles/demo-app-runtime \
   default_ttl=15m \
   max_ttl=1h \
   creation_statements='CREATE ROLE "{{name}}" WITH LOGIN PASSWORD '"'"'{{password}}'"'"' VALID UNTIL '"'"'{{expiration}}'"'"'; GRANT app_runtime TO "{{name}}";' \
-  revocation_statements='REVOKE app_runtime FROM "{{name}}"; DROP ROLE IF EXISTS "{{name}}";' >/dev/null
+  revocation_statements='SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = '"'"'{{name}}'"'"'; REVOKE app_runtime FROM "{{name}}"; DROP ROLE IF EXISTS "{{name}}";' >/dev/null
 
 vault_exec vault write database/roles/demo-app-migrate \
   db_name=demo-postgres \
   default_ttl=10m \
   max_ttl=30m \
   creation_statements='CREATE ROLE "{{name}}" WITH LOGIN PASSWORD '"'"'{{password}}'"'"' VALID UNTIL '"'"'{{expiration}}'"'"'; GRANT migration_runtime TO "{{name}}";' \
-  revocation_statements='REVOKE migration_runtime FROM "{{name}}"; DROP ROLE IF EXISTS "{{name}}";' >/dev/null
+  revocation_statements='SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE usename = '"'"'{{name}}'"'"'; REVOKE migration_runtime FROM "{{name}}"; DROP ROLE IF EXISTS "{{name}}";' >/dev/null
 
 echo "Phase 6 Vault database secrets engine configured."

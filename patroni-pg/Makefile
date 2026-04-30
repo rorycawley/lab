@@ -1,4 +1,4 @@
-.PHONY: help up k8s-base postgres vault vault-auth vault-policies vault-db vault-injector verify verify-phase-1 verify-postgres verify-vault verify-vault-auth verify-vault-policies verify-vault-db verify-vault-injector status clean check-local
+.PHONY: help up k8s-base cert-manager tls postgres vault vault-auth vault-policies vault-db vault-injector build-app deploy-app netpol harden audit-drill audit-report evidence verify verify-phase-1 verify-postgres verify-vault verify-vault-auth verify-vault-policies verify-vault-db verify-vault-injector verify-app verify-pool verify-tls verify-netpol verify-harden verify-audit status clean check-local
 
 SHELL := /bin/bash
 .NOTPARALLEL:
@@ -7,15 +7,24 @@ help:
 	@echo "Vault + PostgreSQL security demo"
 	@echo ""
 	@echo "Targets:"
-	@echo "  make up               Apply phases 1-7 and verify"
+	@echo "  make up               Apply phases 1-14 and verify"
 	@echo "  make k8s-base         Apply namespaces and ServiceAccount"
-	@echo "  make postgres         Apply PostgreSQL and wait for readiness"
-	@echo "  make vault            Apply dev-mode Vault and wait for readiness"
+	@echo "  make cert-manager     Install cert-manager"
+	@echo "  make tls              Issue demo TLS certificates with cert-manager"
+	@echo "  make postgres         Apply TLS-enabled Docker Compose PostgreSQL"
+	@echo "  make vault            Apply dev-mode Vault behind a TLS proxy"
 	@echo "  make vault-auth       Configure Vault Kubernetes auth"
 	@echo "  make vault-policies   Configure Vault runtime and migration policies"
 	@echo "  make vault-db         Configure Vault database secrets engine"
 	@echo "  make vault-injector   Install Vault Agent Injector and smoke Pod"
-	@echo "  make verify           Verify phases 1-7"
+	@echo "  make build-app        Build Phase 8 Python app image"
+	@echo "  make deploy-app       Deploy Phase 8 Python app"
+	@echo "  make netpol           Apply Phase 12 NetworkPolicies"
+	@echo "  make harden           Re-apply Phase 13 hardened manifests to an existing cluster"
+	@echo "  make audit-drill      Run Phase 14 denied-attempt drill and capture evidence"
+	@echo "  make audit-report     Emit Phase 14 structured audit evidence as JSON"
+	@echo "  make evidence         Show Phase 9 security evidence"
+	@echo "  make verify           Verify phases 1-14"
 	@echo "  make verify-phase-1   Verify namespaces, ServiceAccount, and no extra RBAC"
 	@echo "  make verify-postgres  Verify PostgreSQL roles, CRUD, and denied operations"
 	@echo "  make verify-vault     Verify Vault status and audit evidence"
@@ -23,6 +32,12 @@ help:
 	@echo "  make verify-vault-policies Verify Vault policy boundaries"
 	@echo "  make verify-vault-db  Verify dynamic PostgreSQL credentials and revocation"
 	@echo "  make verify-vault-injector Verify sidecar injection and rendered file"
+	@echo "  make verify-app       Verify Python app dynamic credential flow"
+	@echo "  make verify-pool      Verify pooled connection behavior"
+	@echo "  make verify-tls       Verify cert-manager TLS paths"
+	@echo "  make verify-netpol    Verify NetworkPolicy allowed and denied flows"
+	@echo "  make verify-harden    Verify Pod Security Admission and per-Pod hardening"
+	@echo "  make verify-audit     Verify the Phase 14 audit evidence report"
 	@echo "  make status           Show Kubernetes, PostgreSQL, and Vault resources"
 	@echo "  make clean            Remove demo, vault, and database namespaces"
 	@echo "  make check-local      Dry-run Kubernetes manifests"
@@ -34,15 +49,21 @@ help:
 	@echo "  make status"
 	@echo "  make clean"
 
-up: k8s-base postgres vault vault-auth vault-policies vault-db vault-injector verify
+up: k8s-base cert-manager tls postgres vault vault-auth vault-policies vault-db vault-injector build-app deploy-app netpol verify
 
 k8s-base:
 	./scripts/01-apply-k8s-foundation.sh
 
-postgres:
+cert-manager: k8s-base
+	./scripts/22-install-cert-manager.sh
+
+tls: cert-manager
+	./scripts/23-apply-tls-certificates.sh
+
+postgres: tls
 	./scripts/05-apply-postgres.sh
 
-vault:
+vault: tls
 	./scripts/07-apply-vault.sh
 
 vault-auth: k8s-base vault
@@ -57,7 +78,28 @@ vault-db: postgres vault-policies
 vault-injector: vault-db
 	./scripts/15-install-vault-agent-injector.sh
 
-verify: verify-phase-1 verify-postgres verify-vault verify-vault-auth verify-vault-policies verify-vault-db verify-vault-injector
+build-app:
+	./scripts/17-build-python-app.sh
+
+deploy-app: vault-injector build-app
+	./scripts/18-deploy-python-app.sh
+
+netpol: deploy-app
+	./scripts/25-apply-networkpolicies.sh
+
+harden:
+	kubectl apply -f k8s/00-namespaces.yaml
+	./scripts/15-install-vault-agent-injector.sh
+	kubectl apply -f k8s/14-vault-tls-proxy-configmap.yaml
+	kubectl apply -f k8s/07-vault-deployment.yaml
+	kubectl rollout restart deployment/vault --namespace vault
+	kubectl rollout status  deployment/vault --namespace vault --timeout=180s
+	./scripts/17-build-python-app.sh
+	kubectl apply -f k8s/10-python-app-deployment.yaml
+	kubectl rollout restart deployment/python-postgres-demo --namespace demo
+	kubectl rollout status  deployment/python-postgres-demo --namespace demo --timeout=180s
+
+verify: verify-phase-1 verify-postgres verify-vault verify-vault-auth verify-vault-policies verify-vault-db verify-vault-injector verify-app verify-pool verify-tls verify-netpol verify-harden verify-audit
 
 verify-phase-1:
 	./scripts/02-verify-phase-1.sh
@@ -79,6 +121,33 @@ verify-vault-db:
 
 verify-vault-injector:
 	./scripts/16-verify-vault-agent-injector.sh
+
+verify-app:
+	./scripts/19-verify-python-app.sh
+
+verify-pool:
+	./scripts/21-verify-connection-pool.sh
+
+verify-tls:
+	./scripts/24-verify-tls.sh
+
+verify-netpol:
+	./scripts/26-verify-networkpolicies.sh
+
+verify-harden:
+	./scripts/27-verify-container-hardening.sh
+
+audit-drill:
+	./scripts/28-audit-drill.sh
+
+audit-report:
+	./scripts/29-audit-evidence-report.sh
+
+verify-audit:
+	./scripts/30-verify-audit.sh
+
+evidence:
+	./scripts/20-security-evidence.sh
 
 status:
 	./scripts/03-status.sh

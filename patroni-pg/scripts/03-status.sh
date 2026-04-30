@@ -14,11 +14,11 @@ kubectl auth can-i --list --namespace demo --as system:serviceaccount:demo:demo-
 
 echo ""
 echo "PostgreSQL resources:"
-kubectl get statefulset,service,pod,pvc --namespace database -l app.kubernetes.io/name=postgres
+docker compose --env-file .runtime/postgres.env ps postgres
 
 echo ""
 echo "Vault resources:"
-kubectl get statefulset,service,pod --namespace vault -l app.kubernetes.io/name=vault
+kubectl get deployment,service,pod --namespace vault -l app.kubernetes.io/name=vault
 
 echo ""
 echo "Vault TokenReview identity:"
