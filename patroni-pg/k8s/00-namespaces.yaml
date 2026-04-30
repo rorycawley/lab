@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: vault
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: database
+  labels:
+    app.kubernetes.io/part-of: vault-postgres-security-demo
+
