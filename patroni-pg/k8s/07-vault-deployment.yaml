@@ -105,17 +105,17 @@ spec:
                 - vault
                 - status
             initialDelaySeconds: 5
-            periodSeconds: 5
-            timeoutSeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 30
           livenessProbe:
             exec:
               command:
                 - vault
                 - status
-            initialDelaySeconds: 20
-            periodSeconds: 10
-            timeoutSeconds: 5
-            failureThreshold: 5
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 30
+            failureThreshold: 3
         - name: tls-proxy
           image: nginxinc/nginx-unprivileged:1.27-alpine
           imagePullPolicy: IfNotPresent

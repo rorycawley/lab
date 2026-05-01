@@ -33,7 +33,9 @@ app_request DELETE /companies/00000000-0000-0000-0000-000000000041 >/dev/null
 echo "ok: CRUD works against the existing pool while Vault is at replicas=0"
 
 kubectl scale deployment vault --namespace "$vault_namespace" --replicas=1 >/dev/null
-kubectl wait --for=condition=Ready pod -l app.kubernetes.io/name=vault --namespace "$vault_namespace" --timeout=120s >/dev/null
+# Use rollout status (not `kubectl wait pod`) to avoid a race where the
+# pod resource hasn't materialised yet right after scale-up.
+kubectl rollout status deployment/vault --namespace "$vault_namespace" --timeout=180s >/dev/null
 echo "ok: Vault is back to replicas=1 and Ready"
 
 if [[ ! -d .runtime/audit ]]; then

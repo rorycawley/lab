@@ -104,7 +104,10 @@ if ! $recovered; then
   app_init "$demo_namespace"
   app_pod="$APP_POD"
   current_user=""
-  for attempt in 1 2 3 4 5 6 7 8 9 10; do
+  # Up to 60s for the new pod's Vault Agent to render creds and the app's
+  # pool to build PG connections. Readiness probe (/healthz) passes before
+  # /db-identity is functional.
+  for attempt in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
     current_identity="$(app_request GET /db-identity 2>/dev/null || true)"
     current_user="$(jq -r '.current_user // ""' <<<"$current_identity" 2>/dev/null || true)"
     if [[ "$current_user" == v-* ]]; then
