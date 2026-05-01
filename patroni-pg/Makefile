@@ -21,14 +21,14 @@ help:
 	@echo "  make deploy-app       Deploy Phase 8 Python app"
 	@echo "  make netpol           Apply Phase 12 NetworkPolicies"
 	@echo "  make audit-drill      Run Phase 14 denied-attempt drill and capture evidence"
-	@echo "  make audit-report     Emit Phase 14 structured audit evidence as JSON"
+	@echo "  make audit-report     Emit structured audit evidence as JSON (.runtime/audit/report.json)"
 	@echo "  make rotate           Phase 15: rotate the Vault database engine root credential"
 	@echo "  make revoke-runtime   Phase 15: revoke ALL outstanding runtime credentials (destructive)"
 	@echo "  make recover          Phase 15: Vault outage + PostgreSQL restart drills"
 	@echo "  make recover-vault    Phase 15: re-bootstrap a destroyed dev-mode Vault"
 	@echo "  make tf-plan          Phase 16: terraform plan against the live Vault"
 	@echo "  make tf-destroy       Phase 16: terraform destroy (Vault config only)"
-	@echo "  make evidence         Show Phase 9 security evidence"
+	@echo "  make evidence         Show human-readable security evidence (markdown rendering)"
 	@echo "  make verify           Verify phases 1-16"
 	@echo "  make verify-phase-1   Verify namespaces, ServiceAccount, and no extra RBAC"
 	@echo "  make verify-postgres  Verify PostgreSQL roles, CRUD, and denied operations"
@@ -184,7 +184,8 @@ tf-destroy:
 	  cd terraform && terraform destroy -input=false -auto-approve'
 
 evidence:
-	./scripts/20-security-evidence.sh
+	./scripts/29-audit-evidence-report.sh >/dev/null
+	@cat .runtime/audit/report.md
 
 status:
 	./scripts/03-status.sh
