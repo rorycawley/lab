@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
+
 pod="vault-injector-smoke"
 namespace="demo"
 
@@ -46,37 +49,7 @@ if kubectl get pod vault-injector-unannotated --namespace "$namespace" >/dev/nul
   kubectl delete pod vault-injector-unannotated --namespace "$namespace" --wait=true >/dev/null
 fi
 
-kubectl apply -f - <<'YAML' >/dev/null
-apiVersion: v1
-kind: Pod
-metadata:
-  name: vault-injector-unannotated
-  namespace: demo
-spec:
-  restartPolicy: Never
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 100
-    runAsGroup: 1000
-    seccompProfile:
-      type: RuntimeDefault
-  containers:
-    - name: vault-injector-unannotated
-      image: hashicorp/vault:1.17.6
-      command: ["sh", "-ec", "sleep 60"]
-      securityContext:
-        allowPrivilegeEscalation: false
-        runAsNonRoot: true
-        runAsUser: 100
-        runAsGroup: 1000
-        capabilities:
-          drop: [ALL]
-        seccompProfile:
-          type: RuntimeDefault
-      resources:
-        requests: { cpu: 25m, memory: 32Mi }
-        limits:   { cpu: 100m, memory: 64Mi }
-YAML
+apply_psa_test_pod vault-injector-unannotated "$namespace" vault-injector-unannotated hashicorp/vault:1.17.6 100 1000
 kubectl wait --for=condition=Ready pod/vault-injector-unannotated --namespace "$namespace" --timeout=120s >/dev/null
 
 unannotated_sidecar_count="$(kubectl get pod vault-injector-unannotated --namespace "$namespace" -o jsonpath='{.spec.containers[*].name}' | tr ' ' '\n' | grep -c '^vault-agent$' || true)"
