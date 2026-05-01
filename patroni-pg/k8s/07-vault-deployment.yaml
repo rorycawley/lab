@@ -106,6 +106,7 @@ spec:
                 - status
             initialDelaySeconds: 5
             periodSeconds: 5
+            timeoutSeconds: 5
           livenessProbe:
             exec:
               command:
@@ -113,6 +114,8 @@ spec:
                 - status
             initialDelaySeconds: 20
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
         - name: tls-proxy
           image: nginxinc/nginx-unprivileged:1.27-alpine
           imagePullPolicy: IfNotPresent
