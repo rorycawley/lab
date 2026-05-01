@@ -32,7 +32,6 @@ scripts/36-apply-terraform.sh     NEW: port-forward + terraform apply + Postgres
 scripts/37-verify-iac-drift.sh    NEW: NetworkPolicy diff + terraform plan -detailed-exitcode
 scripts/38-doctor.sh              NEW: preflight check for required tools and cluster
 scripts/39-reset.sh               NEW: timed full clean + up + verify with reset SLA
-scripts/40-refresh-image-digests.sh NEW: pin manifest images by current digest
 .github/workflows/ci.yaml         NEW: shellcheck + yamllint + terraform fmt/validate + kubectl dry-run
 scripts/08-verify-vault.sh        UPDATED: assert audit devices exist instead of enabling them
 scripts/34-recover-vault.sh       UPDATED: re-applies Vault config via Terraform
@@ -115,7 +114,6 @@ make doctor
 make vault-config
 make verify-iac
 make tf-plan
-make refresh-digests
 make reset
 ```
 

@@ -1,4 +1,4 @@
-.PHONY: help up k8s-base cert-manager tls postgres vault vault-config vault-injector build-app deploy-app netpol harden audit-drill audit-report rotate revoke-runtime recover recover-vault tf-plan tf-destroy refresh-digests doctor reset evidence verify verify-phase-1 verify-postgres verify-vault verify-vault-auth verify-vault-policies verify-vault-db verify-vault-injector verify-app verify-pool verify-tls verify-netpol verify-harden verify-audit verify-rrr verify-iac status clean check-local
+.PHONY: help up k8s-base cert-manager tls postgres vault vault-config vault-injector build-app deploy-app netpol audit-drill audit-report rotate revoke-runtime recover recover-vault tf-plan tf-destroy doctor reset evidence verify verify-phase-1 verify-postgres verify-vault verify-vault-auth verify-vault-policies verify-vault-db verify-vault-injector verify-app verify-pool verify-tls verify-netpol verify-harden verify-audit verify-rrr verify-iac status clean check-local
 
 SHELL := /bin/bash
 .NOTPARALLEL:
@@ -20,7 +20,6 @@ help:
 	@echo "  make build-app        Build Phase 8 Python app image"
 	@echo "  make deploy-app       Deploy Phase 8 Python app"
 	@echo "  make netpol           Apply Phase 12 NetworkPolicies"
-	@echo "  make harden           Re-apply Phase 13 hardened manifests to an existing cluster"
 	@echo "  make audit-drill      Run Phase 14 denied-attempt drill and capture evidence"
 	@echo "  make audit-report     Emit Phase 14 structured audit evidence as JSON"
 	@echo "  make rotate           Phase 15: rotate the Vault database engine root credential"
@@ -29,7 +28,6 @@ help:
 	@echo "  make recover-vault    Phase 15: re-bootstrap a destroyed dev-mode Vault"
 	@echo "  make tf-plan          Phase 16: terraform plan against the live Vault"
 	@echo "  make tf-destroy       Phase 16: terraform destroy (Vault config only)"
-	@echo "  make refresh-digests  Phase 16: pin manifest images by digest"
 	@echo "  make evidence         Show Phase 9 security evidence"
 	@echo "  make verify           Verify phases 1-16"
 	@echo "  make verify-phase-1   Verify namespaces, ServiceAccount, and no extra RBAC"
@@ -90,18 +88,6 @@ deploy-app: vault-injector build-app
 
 netpol: deploy-app
 	./scripts/25-apply-networkpolicies.sh
-
-harden:
-	kubectl apply -f k8s/00-namespaces.yaml
-	./scripts/15-install-vault-agent-injector.sh
-	kubectl apply -f k8s/14-vault-tls-proxy-configmap.yaml
-	kubectl apply -f k8s/07-vault-deployment.yaml
-	kubectl rollout restart deployment/vault --namespace vault
-	kubectl rollout status  deployment/vault --namespace vault --timeout=180s
-	./scripts/17-build-python-app.sh
-	kubectl apply -f k8s/10-python-app-deployment.yaml
-	kubectl rollout restart deployment/python-postgres-demo --namespace demo
-	kubectl rollout status  deployment/python-postgres-demo --namespace demo --timeout=180s
 
 verify: verify-phase-1 verify-postgres verify-vault verify-vault-auth verify-vault-policies verify-vault-db verify-vault-injector verify-app verify-pool verify-tls verify-netpol verify-harden verify-audit verify-rrr verify-iac
 
@@ -173,9 +159,6 @@ doctor:
 
 reset:
 	./scripts/39-reset.sh
-
-refresh-digests:
-	./scripts/40-refresh-image-digests.sh
 
 tf-plan:
 	@./scripts/36-apply-terraform.sh --plan-only 2>/dev/null || true

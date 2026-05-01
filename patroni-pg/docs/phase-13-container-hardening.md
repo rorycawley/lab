@@ -98,10 +98,12 @@ Run Phase 13 against a fresh cluster:
 make up
 ```
 
-Re-apply Phase 13 to an already-running cluster from earlier phases:
+Re-apply hardened manifests to an already-running cluster:
 
 ```sh
-make harden
+kubectl apply -f k8s/
+kubectl rollout restart deployment/vault --namespace vault
+kubectl rollout restart deployment/python-postgres-demo --namespace demo
 ```
 
 Verify only container hardening:
