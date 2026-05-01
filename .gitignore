@@ -3,6 +3,7 @@
 .AppleDouble
 .LSOverride
 ._*
+.claude/
 
 # Editors / IDEs
 .idea/
