@@ -1,0 +1,15 @@
+# Phase 16 Terraform variables. Copy to terraform.tfvars and edit if you need to
+# override defaults. The wrapper script scripts/36-apply-terraform.sh reads
+# nothing from here directly; it relies on environment variables for VAULT_ADDR
+# and VAULT_TOKEN, and on the defaults defined in variables.tf for the rest.
+
+# demo_namespace               = "demo"
+# demo_app_service_account     = "demo-app"
+# demo_migrate_service_account = "demo-migrate"
+# kubernetes_host              = "https://kubernetes.default.svc:443"
+# postgres_host                = "host.rancher-desktop.internal"
+# postgres_port                = 5432
+# postgres_database            = "demo_registry"
+# postgres_ca_cert_file        = "/vault/postgres-ca/ca.crt"
+# vault_admin_user             = "vault_admin"
+# audit_log_path               = "/vault/audit/audit.log"

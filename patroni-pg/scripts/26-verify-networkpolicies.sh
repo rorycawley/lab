@@ -62,12 +62,39 @@ echo "ok: app still reaches PostgreSQL with Vault-issued runtime credentials"
 postgres_host_ip="$(kubectl exec --namespace "$demo_namespace" "$app_pod" -c app -- \
   python -c 'import socket; print(socket.gethostbyname("host.rancher-desktop.internal"))')"
 
-kubectl run "$test_pod" \
-  --namespace "$demo_namespace" \
-  --image=busybox:1.36 \
-  --restart=Never \
-  --labels="app.kubernetes.io/name=netpol-denied-test" \
-  --command -- sh -c 'sleep 120' >/dev/null
+kubectl apply -f - <<YAML >/dev/null
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${test_pod}
+  namespace: ${demo_namespace}
+  labels:
+    app.kubernetes.io/name: netpol-denied-test
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: ${test_pod}
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 120"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        capabilities:
+          drop: [ALL]
+        seccompProfile:
+          type: RuntimeDefault
+      resources:
+        requests: { cpu: 25m, memory: 16Mi }
+        limits:   { cpu: 100m, memory: 32Mi }
+YAML
 
 kubectl wait --for=condition=Ready "pod/$test_pod" \
   --namespace "$demo_namespace" --timeout=60s >/dev/null

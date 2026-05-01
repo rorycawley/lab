@@ -40,7 +40,7 @@ spec:
       command:
         - sh
         - -ec
-        - sleep 3600
+        - sleep infinity
       securityContext:
         allowPrivilegeEscalation: false
         readOnlyRootFilesystem: true

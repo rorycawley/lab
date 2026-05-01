@@ -188,9 +188,12 @@ spec:
         - protocol: TCP
           port: 8200
 ---
-# Vault egress: PostgreSQL on the host (database secrets engine) and the
-# Kubernetes API server (TokenReview for Kubernetes auth). The API server
-# address varies by distribution, so TCP/443 and TCP/6443 are allowed to any IP.
+# Vault egress: PostgreSQL on the host (database secrets engine), the Kubernetes
+# API server (TokenReview for Kubernetes auth), and the Vault Service hairpin
+# (vault.vault.svc.cluster.local:8200 from inside the Vault Pod itself, used by
+# operator/admin commands that talk to Vault via its public endpoint). The API
+# server address varies by distribution, so TCP/443 and TCP/6443 are allowed to
+# any IP. TCP/8200 is restricted to the Vault Pod itself.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -217,6 +220,13 @@ spec:
           port: 6443
         - protocol: TCP
           port: 5432
+    - to:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/name: vault
+      ports:
+        - protocol: TCP
+          port: 8200
 ---
 # Vault Agent Injector receives admission webhook calls from the Kubernetes API
 # server on TCP/8443 and reads cluster state on TCP/443 / TCP/6443. The API

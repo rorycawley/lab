@@ -19,12 +19,14 @@ grep -q "Sealed.*false" /tmp/phase3-vault-status.out
 echo "ok: Vault is initialized and unsealed"
 
 if ! vault_exec vault audit list -format=json | grep -q '"file/"'; then
-  vault_exec vault audit enable file file_path=stdout >/dev/null
+  echo "error: Vault stdout audit device is missing; run make vault-config to apply Phase 16 Terraform"
+  exit 1
 fi
 echo "ok: Vault stdout audit device is enabled"
 
 if ! vault_exec vault audit list -format=json | grep -q '"file_disk/"'; then
-  vault_exec vault audit enable -path=file_disk file file_path=/vault/audit/audit.log >/dev/null
+  echo "error: Vault on-disk audit device is missing; run make vault-config to apply Phase 16 Terraform"
+  exit 1
 fi
 echo "ok: Vault on-disk audit device at /vault/audit/audit.log is enabled"
 

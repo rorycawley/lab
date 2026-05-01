@@ -130,12 +130,39 @@ docker compose --env-file .runtime/postgres.env logs --tail=200 postgres 2>/dev/
 echo "ok: 05-drop-table-and-create-role - app proves DROP TABLE and CREATE ROLE are denied"
 
 cleanup_test_pod
-kubectl run "$test_pod" \
-  --namespace "$demo_namespace" \
-  --image=busybox:1.36 \
-  --restart=Never \
-  --labels="app.kubernetes.io/name=audit-drill-tester" \
-  --command -- sh -c 'sleep 120' >/dev/null
+kubectl apply -f - <<YAML >/dev/null
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ${test_pod}
+  namespace: ${demo_namespace}
+  labels:
+    app.kubernetes.io/name: audit-drill-tester
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: ${test_pod}
+      image: busybox:1.36
+      command: ["sh", "-c", "sleep 120"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        capabilities:
+          drop: [ALL]
+        seccompProfile:
+          type: RuntimeDefault
+      resources:
+        requests: { cpu: 25m, memory: 16Mi }
+        limits:   { cpu: 100m, memory: 32Mi }
+YAML
 kubectl wait --for=condition=Ready "pod/$test_pod" \
   --namespace "$demo_namespace" --timeout=60s >/dev/null
 

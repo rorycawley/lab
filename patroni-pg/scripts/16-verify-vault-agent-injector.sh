@@ -46,11 +46,37 @@ if kubectl get pod vault-injector-unannotated --namespace "$namespace" >/dev/nul
   kubectl delete pod vault-injector-unannotated --namespace "$namespace" --wait=true >/dev/null
 fi
 
-kubectl run vault-injector-unannotated \
-  --namespace "$namespace" \
-  --image=hashicorp/vault:1.17.6 \
-  --restart=Never \
-  --command -- sh -ec 'sleep 60' >/dev/null
+kubectl apply -f - <<'YAML' >/dev/null
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vault-injector-unannotated
+  namespace: demo
+spec:
+  restartPolicy: Never
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 100
+    runAsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: vault-injector-unannotated
+      image: hashicorp/vault:1.17.6
+      command: ["sh", "-ec", "sleep 60"]
+      securityContext:
+        allowPrivilegeEscalation: false
+        runAsNonRoot: true
+        runAsUser: 100
+        runAsGroup: 1000
+        capabilities:
+          drop: [ALL]
+        seccompProfile:
+          type: RuntimeDefault
+      resources:
+        requests: { cpu: 25m, memory: 32Mi }
+        limits:   { cpu: 100m, memory: 64Mi }
+YAML
 kubectl wait --for=condition=Ready pod/vault-injector-unannotated --namespace "$namespace" --timeout=120s >/dev/null
 
 unannotated_sidecar_count="$(kubectl get pod vault-injector-unannotated --namespace "$namespace" -o jsonpath='{.spec.containers[*].name}' | tr ' ' '\n' | grep -c '^vault-agent$' || true)"

@@ -64,21 +64,21 @@ check_pod_hardening() {
     container_name="$(jq -r ".spec.containers[$i].name" <<<"$pod_json")"
 
     local allow_pe
-    allow_pe="$(jq -r ".spec.containers[$i].securityContext.allowPrivilegeEscalation // true" <<<"$pod_json")"
+    allow_pe="$(jq -r "if .spec.containers[$i].securityContext | has(\"allowPrivilegeEscalation\") then .spec.containers[$i].securityContext.allowPrivilegeEscalation else true end" <<<"$pod_json")"
     if [[ "$allow_pe" != "false" ]]; then
       echo "error: $namespace/$pod container $container_name allows privilege escalation"
       exit 1
     fi
 
     local drops
-    drops="$(jq -r ".spec.containers[$i].securityContext.capabilities.drop // [] | join(\",\")" <<<"$pod_json")"
+    drops="$(jq -r "(.spec.containers[$i].securityContext.capabilities.drop // []) | join(\",\")" <<<"$pod_json")"
     if [[ ",$drops," != *",ALL,"* ]]; then
       echo "error: $namespace/$pod container $container_name does not drop ALL capabilities (drops='$drops')"
       exit 1
     fi
 
     local seccomp
-    seccomp="$(jq -r ".spec.containers[$i].securityContext.seccompProfile.type // (.spec.securityContext.seccompProfile.type // \"\")" <<<"$pod_json")"
+    seccomp="$(jq -r "(.spec.containers[$i].securityContext.seccompProfile.type // .spec.securityContext.seccompProfile.type // \"\")" <<<"$pod_json")"
     if [[ "$seccomp" != "RuntimeDefault" && "$seccomp" != "Localhost" ]]; then
       echo "error: $namespace/$pod container $container_name does not set seccompProfile (got '$seccomp')"
       exit 1
@@ -96,8 +96,15 @@ check_pod_hardening() {
   done
 }
 
-mapfile -t demo_pods < <(kubectl get pod --namespace "$demo_namespace" -l app.kubernetes.io/part-of=vault-postgres-security-demo -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
-mapfile -t vault_pods < <(kubectl get pod --namespace "$vault_namespace" -l app.kubernetes.io/part-of=vault-postgres-security-demo -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+demo_pods=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && demo_pods+=("$line")
+done < <(kubectl get pod --namespace "$demo_namespace" -l app.kubernetes.io/part-of=vault-postgres-security-demo -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
+
+vault_pods=()
+while IFS= read -r line; do
+  [[ -n "$line" ]] && vault_pods+=("$line")
+done < <(kubectl get pod --namespace "$vault_namespace" -l app.kubernetes.io/part-of=vault-postgres-security-demo -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}')
 
 if [[ "${#demo_pods[@]}" -eq 0 ]]; then
   echo "error: no demo Pods labeled with the demo's part-of label were found"
@@ -163,7 +170,8 @@ req = urllib.request.Request(
 )
 with urllib.request.urlopen(req, timeout=10) as response:
     payload = json.loads(response.read().decode())
-assert payload.get("allowed") is False, payload
+assert payload["create_role"]["allowed"] is False, payload
+assert payload["drop_table"]["allowed"] is False, payload
 '
 echo "ok: app still proves forbidden DB operations are denied (DROP/CREATE ROLE)"
 
