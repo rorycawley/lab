@@ -1,69 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
+
 demo_namespace="demo"
 vault_namespace="vault"
 
-app_pod() {
-  kubectl get pod --namespace "$demo_namespace" -l app.kubernetes.io/name=python-postgres-demo -o jsonpath='{.items[0].metadata.name}'
-}
-
-app_request() {
-  local method="$1"
-  local path="$2"
-  local body="${3:-}"
-  local pod
-  pod="$(app_pod)"
-
-  kubectl exec --namespace "$demo_namespace" "$pod" -c app -- python -c '
-import json
-import sys
-import urllib.request
-
-method, path, body = sys.argv[1], sys.argv[2], sys.argv[3]
-data = body.encode() if body else None
-headers = {"Content-Type": "application/json"} if body else {}
-req = urllib.request.Request(
-    "http://127.0.0.1:8080" + path,
-    data=data,
-    method=method,
-    headers=headers,
-)
-with urllib.request.urlopen(req, timeout=10) as response:
-    print(response.read().decode())
-' "$method" "$path" "$body"
-}
-
-app_request_status() {
-  local method="$1"
-  local path="$2"
-  local body="${3:-}"
-  local pod
-  pod="$(app_pod)"
-
-  kubectl exec --namespace "$demo_namespace" "$pod" -c app -- python -c '
-import sys
-import urllib.error
-import urllib.request
-
-method, path, body = sys.argv[1], sys.argv[2], sys.argv[3]
-data = body.encode() if body else None
-headers = {"Content-Type": "application/json"} if body else {}
-req = urllib.request.Request(
-    "http://127.0.0.1:8080" + path,
-    data=data,
-    method=method,
-    headers=headers,
-)
-try:
-    with urllib.request.urlopen(req, timeout=10) as response:
-        print(response.status)
-except urllib.error.HTTPError as exc:
-    print(exc.code)
-except Exception:
-    print("0")
-' "$method" "$path" "$body"
-}
+app_init "$demo_namespace"
 
 echo "Phase 15 recovery drill A: Vault outage."
 
@@ -130,6 +74,7 @@ set +a
 # render against the freshly bootstrapped Vault.
 kubectl rollout restart deployment/python-postgres-demo --namespace "$demo_namespace" >/dev/null
 kubectl rollout status  deployment/python-postgres-demo --namespace "$demo_namespace" --timeout=180s >/dev/null
+app_init "$demo_namespace"
 app_request POST /companies '{"id":"00000000-0000-0000-0000-000000000042","name":"Recovery Post","status":"active"}' >/dev/null
 app_request DELETE /companies/00000000-0000-0000-0000-000000000042 >/dev/null
 echo "ok: post-recovery CRUD works against re-bootstrapped Vault"
@@ -141,13 +86,13 @@ docker compose --env-file .runtime/postgres.env restart postgres >/dev/null
 echo "ok: docker compose restart postgres issued"
 
 healthy=false
-for _ in 1 2 3 4 5 6 7 8 9 10; do
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
   if docker compose --env-file .runtime/postgres.env ps --format json postgres 2>/dev/null \
       | jq -r '.Health' 2>/dev/null | grep -qx "healthy"; then
     healthy=true
     break
   fi
-  sleep 2
+  sleep 1
 done
 if ! $healthy; then
   echo "error: PostgreSQL did not return to healthy within the wait window"
@@ -156,14 +101,14 @@ fi
 echo "ok: PostgreSQL container is healthy again"
 
 reconnected=false
-for _ in 1 2 3 4 5 6 7 8 9 10; do
+for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
   status="$(app_request_status GET /db-identity)"
   if [[ "$status" == "200" ]]; then
     reconnected=true
     break
   fi
   app_request POST /pool/reload '{}' >/dev/null 2>&1 || true
-  sleep 2
+  sleep 1
 done
 if ! $reconnected; then
   echo "error: app pool did not recover after PostgreSQL restart"

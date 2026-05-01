@@ -1,4 +1,4 @@
-.PHONY: help up k8s-base cert-manager tls postgres vault vault-config vault-injector build-app deploy-app netpol audit-drill audit-report rotate revoke-runtime recover recover-vault tf-plan tf-destroy doctor reset evidence verify verify-phase-1 verify-postgres verify-vault verify-vault-auth verify-vault-policies verify-vault-db verify-vault-injector verify-app verify-pool verify-tls verify-netpol verify-harden verify-audit verify-rrr verify-iac status clean check-local
+.PHONY: help up prefetch k8s-base cert-manager tls postgres vault vault-config vault-injector build-app deploy-app netpol audit-drill audit-report rotate revoke-runtime recover recover-vault tf-plan tf-destroy doctor reset evidence verify verify-phase-1 verify-postgres verify-vault verify-vault-auth verify-vault-policies verify-vault-db verify-vault-injector verify-app verify-pool verify-tls verify-netpol verify-harden verify-audit verify-rrr verify-iac status clean check-local
 
 SHELL := /bin/bash
 .NOTPARALLEL:
@@ -44,7 +44,10 @@ help:
 	@echo ""
 	@echo "Typical flow: make doctor && make up && make status"
 
-up: k8s-base cert-manager tls postgres vault vault-config vault-injector build-app deploy-app netpol verify
+up: prefetch k8s-base cert-manager tls postgres vault vault-config vault-injector build-app deploy-app netpol verify
+
+prefetch:
+	./scripts/00-prefetch-images.sh
 
 k8s-base:
 	./scripts/01-apply-k8s-foundation.sh
