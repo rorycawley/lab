@@ -1,33 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
+
 namespace="demo"
-selector="app.kubernetes.io/name=python-postgres-demo"
-pod="$(kubectl get pod --namespace "$namespace" -l "$selector" -o jsonpath='{.items[0].metadata.name}')"
 company_id="00000000-0000-0000-0000-000000000010"
 
+app_init "$namespace"
+pod="$APP_POD"
+
 request() {
-  local method="$1"
-  local path="$2"
-  local body="${3:-}"
-
-  kubectl exec --namespace "$namespace" "$pod" -c app -- python -c '
-import json
-import sys
-import urllib.request
-
-method, path, body = sys.argv[1], sys.argv[2], sys.argv[3]
-data = body.encode() if body else None
-headers = {"Content-Type": "application/json"} if body else {}
-req = urllib.request.Request(
-    "http://127.0.0.1:8080" + path,
-    data=data,
-    method=method,
-    headers=headers,
-)
-with urllib.request.urlopen(req, timeout=10) as response:
-    print(response.read().decode())
-' "$method" "$path" "$body"
+  app_request "$@"
 }
 
 json_field() {

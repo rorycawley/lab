@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
+
 demo_namespace="demo"
 vault_namespace="vault"
 audit_dir=".runtime/audit"
 
 mkdir -p "$audit_dir"
 
-vault_pod="$(kubectl get pod --namespace "$vault_namespace" -l app.kubernetes.io/name=vault --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
-vault_token="$(kubectl get secret vault-dev-root-token --namespace "$vault_namespace" -o jsonpath='{.data.token}' | base64 --decode)"
-app_pod="$(kubectl get pod --namespace "$demo_namespace" -l app.kubernetes.io/name=python-postgres-demo -o jsonpath='{.items[0].metadata.name}')"
-
-vault_exec() {
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -c vault -- \
-    env VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN="$vault_token" "$@"
-}
+vault_init
+app_init "$demo_namespace"
+vault_pod="$VAULT_POD"
+vault_token="$VAULT_TOKEN"
+app_pod="$APP_POD"
 
 generated_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 service_account="$(kubectl get pod "$app_pod" --namespace "$demo_namespace" -o jsonpath='{.spec.serviceAccountName}')"

@@ -12,25 +12,16 @@ test_pod="audit-drill-tester"
 mkdir -p "$audit_dir"
 rm -f "$audit_dir"/*.log "$audit_dir"/report.json "$audit_dir"/report.md 2>/dev/null || true
 
-vault_pod="$(kubectl get pod --namespace "$vault_namespace" -l app.kubernetes.io/name=vault --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
-vault_token="$(kubectl get secret vault-dev-root-token --namespace "$vault_namespace" -o jsonpath='{.data.token}' | base64 --decode)"
-app_pod="$(kubectl get pod --namespace "$demo_namespace" -l app.kubernetes.io/name=python-postgres-demo -o jsonpath='{.items[0].metadata.name}')"
-
-vault_exec() {
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -c vault -- \
-    env VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN="$vault_token" "$@"
-}
-
-vault_audit_size() {
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -c vault -- \
-    sh -ec 'wc -c </vault/audit/audit.log 2>/dev/null || echo 0' | tr -d '[:space:]'
-}
+vault_init
+app_init "$demo_namespace"
+vault_pod="$VAULT_POD"
+vault_token="$VAULT_TOKEN"
+app_pod="$APP_POD"
 
 vault_audit_diff() {
   local before="$1"
   local out="$2"
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -c vault -- \
-    sh -ec "tail -c +$((before + 1)) /vault/audit/audit.log" >"$out"
+  audit_log_diff "$before" >"$out"
 }
 
 cleanup_test_pod() {
@@ -49,7 +40,7 @@ run_vault_denial() {
   local description="$2"
   shift 2
   local before
-  before="$(vault_audit_size)"
+  before="$(audit_log_size)"
 
   if "$@" >/tmp/audit-drill-stdout 2>/tmp/audit-drill-stderr; then
     echo "error: drill case '$id' ($description) unexpectedly succeeded"

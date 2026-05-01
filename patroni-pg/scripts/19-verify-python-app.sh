@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
+
 namespace="demo"
-selector="app.kubernetes.io/name=python-postgres-demo"
 company_id="00000000-0000-0000-0000-000000000008"
 
-pod="$(kubectl get pod --namespace "$namespace" -l "$selector" -o jsonpath='{.items[0].metadata.name}')"
+app_init "$namespace"
+pod="$APP_POD"
 
 kubectl wait --for=condition=Ready "pod/$pod" --namespace "$namespace" --timeout=120s >/dev/null
 echo "ok: Python app Pod is Ready"
@@ -27,37 +30,7 @@ kubectl exec --namespace "$namespace" "$pod" -c app -- test -f /vault/secrets/db
 echo "ok: Python app can see rendered credential file"
 
 request() {
-  local method="$1"
-  local path="$2"
-  local body="${3:-}"
-
-  if [[ -n "$body" ]]; then
-    kubectl exec --namespace "$namespace" "$pod" -c app -- python -c '
-import json
-import sys
-import urllib.request
-
-method, path, body = sys.argv[1], sys.argv[2], sys.argv[3]
-req = urllib.request.Request(
-    "http://127.0.0.1:8080" + path,
-    data=body.encode(),
-    method=method,
-    headers={"Content-Type": "application/json"},
-)
-with urllib.request.urlopen(req, timeout=10) as response:
-    print(response.read().decode())
-' "$method" "$path" "$body"
-  else
-    kubectl exec --namespace "$namespace" "$pod" -c app -- python -c '
-import sys
-import urllib.request
-
-method, path = sys.argv[1], sys.argv[2]
-req = urllib.request.Request("http://127.0.0.1:8080" + path, method=method)
-with urllib.request.urlopen(req, timeout=10) as response:
-    print(response.read().decode())
-' "$method" "$path"
-  fi
+  app_request "$@"
 }
 
 request GET /healthz | grep -q '"ok"'

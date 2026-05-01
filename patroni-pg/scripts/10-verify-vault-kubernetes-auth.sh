@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-vault_namespace="vault"
-root_token="$(kubectl get secret vault-dev-root-token --namespace "$vault_namespace" -o jsonpath='{.data.token}' | base64 --decode)"
-vault_pod="$(kubectl get pod --namespace "$vault_namespace" -l app.kubernetes.io/name=vault --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
+# shellcheck source=lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
 
-vault_exec() {
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN="$root_token" "$@"
-}
+vault_init
+vault_namespace="$VAULT_NS"
+vault_pod="$VAULT_POD"
 
 can_i() {
   kubectl auth can-i "$@" 2>/dev/null || true
@@ -15,7 +14,7 @@ can_i() {
 
 login_with_jwt() {
   local jwt="$1"
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -- env VAULT_ADDR=http://127.0.0.1:8201 \
+  kubectl exec --namespace "$VAULT_NS" "$VAULT_POD" -- env VAULT_ADDR=http://127.0.0.1:8201 \
     vault write -format=json auth/kubernetes/login role=demo-app jwt="$jwt"
 }
 

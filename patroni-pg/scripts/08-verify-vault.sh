@@ -1,13 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-namespace="vault"
-token="$(kubectl get secret vault-dev-root-token --namespace "$namespace" -o jsonpath='{.data.token}' | base64 --decode)"
-pod="$(kubectl get pod --namespace "$namespace" -l app.kubernetes.io/name=vault --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
+# shellcheck source=lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
 
-vault_exec() {
-  kubectl exec --namespace "$namespace" "$pod" -- env VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN="$token" "$@"
-}
+vault_init
+namespace="$VAULT_NS"
+pod="$VAULT_POD"
 
 kubectl get service vault --namespace "$namespace" >/dev/null
 kubectl rollout status deployment/vault --namespace "$namespace" --timeout=60s >/dev/null

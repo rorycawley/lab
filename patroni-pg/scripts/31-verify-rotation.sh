@@ -1,48 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=lib/common.sh
+source "$(dirname "$0")/lib/common.sh"
+
 demo_namespace="demo"
 vault_namespace="vault"
 audit_dir=".runtime/audit"
 mkdir -p "$audit_dir"
 
-vault_pod="$(kubectl get pod --namespace "$vault_namespace" -l app.kubernetes.io/name=vault --field-selector=status.phase=Running -o jsonpath='{.items[0].metadata.name}')"
-vault_token="$(kubectl get secret vault-dev-root-token --namespace "$vault_namespace" -o jsonpath='{.data.token}' | base64 --decode)"
-app_pod="$(kubectl get pod --namespace "$demo_namespace" -l app.kubernetes.io/name=python-postgres-demo -o jsonpath='{.items[0].metadata.name}')"
-
-vault_exec() {
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -c vault -- \
-    env VAULT_ADDR=http://127.0.0.1:8201 VAULT_TOKEN="$vault_token" "$@"
-}
-
-audit_size() {
-  kubectl exec --namespace "$vault_namespace" "$vault_pod" -c vault -- \
-    sh -ec 'wc -c </vault/audit/audit.log 2>/dev/null || echo 0' | tr -d '[:space:]'
-}
-
-app_request() {
-  local method="$1"
-  local path="$2"
-  local body="${3:-}"
-
-  kubectl exec --namespace "$demo_namespace" "$app_pod" -c app -- python -c '
-import json
-import sys
-import urllib.request
-
-method, path, body = sys.argv[1], sys.argv[2], sys.argv[3]
-data = body.encode() if body else None
-headers = {"Content-Type": "application/json"} if body else {}
-req = urllib.request.Request(
-    "http://127.0.0.1:8080" + path,
-    data=data,
-    method=method,
-    headers=headers,
-)
-with urllib.request.urlopen(req, timeout=10) as response:
-    print(response.read().decode())
-' "$method" "$path" "$body"
-}
+vault_init
+app_init "$demo_namespace"
+vault_pod="$VAULT_POD"
+vault_token="$VAULT_TOKEN"
+app_pod="$APP_POD"
 
 echo "Phase 15 rotation drill."
 
@@ -61,7 +32,7 @@ app_request POST /companies '{"id":"00000000-0000-0000-0000-000000000031","name"
 app_request DELETE /companies/00000000-0000-0000-0000-000000000031 >/dev/null
 echo "ok: pre-rotation CRUD works"
 
-before="$(audit_size)"
+before="$(audit_log_size)"
 vault_exec vault write -force database/rotate-root/demo-postgres >/dev/null
 sleep 1
 echo "ok: vault wrote -force database/rotate-root/demo-postgres"
