@@ -1,0 +1,3 @@
+generated/
+logs/
+app/__pycache__/

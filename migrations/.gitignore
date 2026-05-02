@@ -1,0 +1,5 @@
+generated/
+logs/
+__pycache__/
+*.pyc
+

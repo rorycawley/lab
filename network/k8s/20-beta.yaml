@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: beta-app
+  namespace: network-beta
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: beta-app
+  template:
+    metadata:
+      labels:
+        app: beta-app
+        role: protected-service
+    spec:
+      serviceAccountName: beta-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: network-zero-trust-app:demo
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: https
+              containerPort: 8443
+          env:
+            - name: SERVICE_NAME
+              value: beta
+            - name: NAMESPACE
+              value: network-beta
+            - name: REQUIRE_CLIENT_CERT
+              value: "true"
+            - name: ALLOWED_CLIENT_CN
+              value: alpha.network-zero-trust.local
+            - name: CA_CERT
+              value: /tls/ca.crt
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+          readinessProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: https
+            periodSeconds: 10
+      volumes:
+        - name: tls
+          secret:
+            secretName: beta-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: beta-app
+  namespace: network-beta
+spec:
+  selector:
+    app: beta-app
+  ports:
+    - name: https
+      port: 8443
+      targetPort: https

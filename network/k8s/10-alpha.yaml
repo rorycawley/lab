@@ -1,0 +1,83 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: alpha-app
+  namespace: network-alpha
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: alpha-app
+  template:
+    metadata:
+      labels:
+        app: alpha-app
+        role: approved-client
+    spec:
+      serviceAccountName: alpha-app
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          image: network-zero-trust-app:demo
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          ports:
+            - name: https
+              containerPort: 8443
+          env:
+            - name: SERVICE_NAME
+              value: alpha
+            - name: NAMESPACE
+              value: network-alpha
+            - name: PEER_URL
+              value: https://beta-app.network-beta.svc.cluster.local:8443
+            - name: REQUIRE_CLIENT_CERT
+              value: "false"
+            - name: CLIENT_CERT
+              value: /tls/tls.crt
+            - name: CLIENT_KEY
+              value: /tls/tls.key
+            - name: CA_CERT
+              value: /tls/ca.crt
+          volumeMounts:
+            - name: tls
+              mountPath: /tls
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /readyz
+              port: https
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              scheme: HTTPS
+              path: /healthz
+              port: https
+            periodSeconds: 10
+      volumes:
+        - name: tls
+          secret:
+            secretName: alpha-tls
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: alpha-app
+  namespace: network-alpha
+spec:
+  selector:
+    app: alpha-app
+  ports:
+    - name: https
+      port: 8443
+      targetPort: https

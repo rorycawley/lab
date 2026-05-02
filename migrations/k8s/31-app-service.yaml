@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: migrations-demo-api
+  namespace: migrations-demo
+spec:
+  selector:
+    app: migrations-demo-api
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+

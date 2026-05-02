@@ -1,0 +1,25 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: network-alpha
+  labels:
+    kubernetes.io/metadata.name: network-alpha
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: network-beta
+  labels:
+    kubernetes.io/metadata.name: network-beta
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: alpha-app
+  namespace: network-alpha
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: beta-app
+  namespace: network-beta

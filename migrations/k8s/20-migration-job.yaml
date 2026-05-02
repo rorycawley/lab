@@ -1,0 +1,59 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: db-migrate
+  namespace: migrations-demo
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: db-migrate
+        role: migrator
+    spec:
+      serviceAccountName: migrator
+      automountServiceAccountToken: false
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10002
+        fsGroup: 10002
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: migrator
+          image: migrations-demo-migrator:demo
+          imagePullPolicy: Never
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: migrator-db-credentials
+                  key: database_url
+          volumeMounts:
+            - name: postgres-ca
+              mountPath: /var/run/postgres-ca
+              readOnly: true
+            - name: postgres-client
+              mountPath: /var/run/postgres-client
+              readOnly: true
+      volumes:
+        - name: postgres-ca
+          secret:
+            secretName: postgres-ca
+            defaultMode: 0444
+        - name: postgres-client
+          secret:
+            secretName: migrator-db-credentials
+            items:
+              - key: tls.crt
+                path: tls.crt
+              - key: tls.key
+                path: tls.key
+            defaultMode: 0440
