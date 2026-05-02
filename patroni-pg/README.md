@@ -73,6 +73,55 @@ This also gives you forensics. Every database query is tagged with the
 generated username, so logs say *exactly which Vault lease* did *exactly which
 SQL operation* at *exactly what time*.
 
+The full issuance path, in 10 steps:
+
+```text
+   Pod (demo/python-postgres-demo)              Vault                          Postgres
+   ─────────────────────────────────            ─────                          ────────
+   ┌─ vault-agent-init ──────┐
+   │ 1. read SA JWT          │
+   │    /var/run/secrets/    │
+   │    kubernetes.io/.../   │
+   │    token                │
+   │                         │   2. POST auth/kubernetes/login (jwt=...)
+   │                         │ ────────────────────────────────▶
+   │                         │
+   │                         │   3. TokenReview → K8s API → ✓ identity OK
+   │                         │
+   │                         │   4. apply policy demo-app-runtime
+   │                         │      → grants `read` on
+   │                         │        database/creds/demo-app-runtime
+   │                         │
+   │                         │   5. database engine: CREATE ROLE
+   │                         │ ────────────────────────────────────────────▶
+   │                         │      v-token-demo-app-runtime-XXXXX
+   │                         │      GRANT app_runtime
+   │                         │ ◀───────────────── ack ─────────────────────
+   │                         │
+   │   6. lease + user/pass  ◀
+   │                         │
+   │   7. render file:       │
+   │      /vault/secrets/    │
+   │      db-creds           │
+   └─────────┬───────────────┘
+             │
+             ▼
+   ┌─ app container ─────────┐
+   │ 8. read /vault/secrets/ │
+   │    db-creds             │
+   │                         │   9. psycopg.connect(host=..., user=v-token-...,
+   │                         │      password=..., sslmode=verify-full)
+   │                         │ ──────────────────────────────────────────────▶
+   │                         │
+   │                         │   10. SELECT/INSERT/UPDATE/DELETE
+   │                         │       (DROP TABLE → permission denied)
+   └─────────────────────────┘
+
+   After 15 minutes the lease expires. Vault drops the Postgres role and
+   terminates active sessions. The app's pool max-lifetime (10 minutes)
+   rotates connections before that, so the rotation is invisible to users.
+```
+
 ### 3. Authorization is layered
 
 > *"Vault decides if the app can ask. Postgres decides what the resulting user
@@ -93,6 +142,35 @@ In this demo:
 - **Pod Security Admission** authorises what Pods are allowed to run at all
   (no privileged, no root, no host paths)
 - **TLS** authorises connections cryptographically (`verify-full` everywhere)
+
+Visualised as a stack the attacker has to climb:
+
+```text
+  ┌────────────────────────────────────────────────────────────────────┐
+  │ 1. Pod Security Admission   "restricted" profile, admission-time   │
+  ├────────────────────────────────────────────────────────────────────┤
+  │ 2. Workload identity         K8s SA → cluster-signed JWT           │
+  ├────────────────────────────────────────────────────────────────────┤
+  │ 3. Vault Kubernetes auth     TokenReview verifies the JWT          │
+  ├────────────────────────────────────────────────────────────────────┤
+  │ 4. Vault policy              scoped to specific credential paths   │
+  ├────────────────────────────────────────────────────────────────────┤
+  │ 5. NetworkPolicy             default-deny + 3 contracted flows     │
+  ├────────────────────────────────────────────────────────────────────┤
+  │ 6. TLS verify-full           Vault HTTPS, Postgres SSL, both with  │
+  │                              cert-manager-issued CA                │
+  ├────────────────────────────────────────────────────────────────────┤
+  │ 7. PostgreSQL grants         SELECT/INSERT/UPDATE/DELETE only;     │
+  │                              DROP TABLE / CREATE ROLE denied       │
+  ├────────────────────────────────────────────────────────────────────┤
+  │ 8. Lease TTL                 15-minute credential, mass-revocable  │
+  ├────────────────────────────────────────────────────────────────────┤
+  │ 9. Audit (two devices)       stdout + on-disk file, every API call │
+  └────────────────────────────────────────────────────────────────────┘
+
+  An attacker must defeat all 9 layers within the lease window — and
+  every step they take is recorded twice.
+```
 
 Each layer is verified independently. A breach in any one of them does not
 compromise the others.
@@ -163,33 +241,67 @@ The core principle, in one sentence:
 ## Architecture
 
 ```text
-Kubernetes cluster
-
-namespace: demo
-  Python app Pod
-    ServiceAccount: demo-app                   ← "who am I"
-    Vault Agent sidecar                         ← gets the credential, renews it
-    Rendered file: /vault/secrets/db-creds      ← short-lived DB user/password
-    NetworkPolicy: only allowed to reach Vault and Postgres
-    Pod Security: non-root, read-only root, dropped capabilities
-
-namespace: vault
-  Vault dev server                              ← credential broker
-    TLS proxy (cert-manager certificate)
-    Kubernetes auth method                      ← verifies SA tokens via TokenReview
-    Database secrets engine                     ← creates short-lived PG users
-    Two audit devices                           ← stdout + on-disk file
-
-Docker Compose (host)
-  PostgreSQL 16
-    TLS-only TCP                                ← no plaintext connections
-    schema_owner / migration_runtime / app_runtime  ← role-based privilege
-    vault_admin                                 ← Vault uses this to create dynamic users
-
-Terraform                                       ← declarative source of truth
-  Vault auth method, policies, database engine, audit devices
-  Drift detected by `make verify-iac`
+                              ┌─────────────────────────────────────────┐
+                              │       Kubernetes cluster                │
+                              │                                         │
+   ┌──────────────────┐       │  ┌─ namespace: demo ─────────────────┐  │
+   │   Operator       │       │  │                                   │  │
+   │  (you, with      │       │  │  ┌─ Pod: python-postgres-demo ──┐ │  │
+   │   kubectl +      │       │  │  │  ServiceAccount: demo-app    │ │  │
+   │   terraform)     │       │  │  │                              │ │  │
+   └────────┬─────────┘       │  │  │  ┌─ vault-agent-init ──┐    │ │  │
+            │                  │  │  │  │ login + render       │    │ │  │
+            │ apply via TF     │  │  │  └──────────┬───────────┘    │ │  │
+            ▼                  │  │  │             │                │ │  │
+   ┌──────────────────┐       │  │  │  ┌──────────▼───────────┐    │ │  │
+   │  Vault config    │       │  │  │  │ /vault/secrets/      │    │ │  │
+   │  (terraform/)    │       │  │  │  │ db-creds (mode 0400) │    │ │  │
+   │                  │       │  │  │  │ DB_USERNAME=v-...    │    │ │  │
+   │ - auth methods   │       │  │  │  │ DB_PASSWORD=...      │    │ │  │
+   │ - policies       │       │  │  │  └──────────┬───────────┘    │ │  │
+   │ - DB engine      │       │  │  │             │                │ │  │
+   │ - audit devices  │       │  │  │  ┌──────────▼───────────┐    │ │  │
+   └────────┬─────────┘       │  │  │  │ app (Python+Flask)   │    │ │  │
+            │                  │  │  │  │ - reads file         │    │ │  │
+            │                  │  │  │  │ - psycopg pool       │    │ │  │
+            ▼                  │  │  │  │ - HTTP /companies    │    │ │  │
+   ┌──────────────────┐       │  │  │  └──────────┬───────────┘    │ │  │
+   │  ┌─ namespace:   │       │  │  │             │                │ │  │
+   │  │   vault ──┐   │       │  │  └─────────────┼────────────────┘ │  │
+   │  │           │   │       │  │                │                  │  │
+   │  │  Vault    │   │       │  │  Default-deny NetworkPolicy       │  │
+   │  │  - auth   │◀──┼───────┼──┘  permits only:                    │  │
+   │  │  - policy │   │       │     demo-app → vault:8200             │  │
+   │  │  - DB eng.│   │       │     demo-app → host:5432              │  │
+   │  │  - audit  │───┼───────┼─────vault → host:5432  (DB engine)    │  │
+   │  └───────────┘   │       └────────────────┬──────────────────────┘  │
+   └──────────────────┘                        │ (host network)         │
+                                               │                         │
+                                       ┌───────▼───────────────┐         │
+                                       │ Docker Compose         │         │
+                                       │   PostgreSQL 16        │         │
+                                       │ - TLS-only             │         │
+                                       │ - schema_owner         │         │
+                                       │ - migration_runtime    │         │
+                                       │ - app_runtime          │         │
+                                       │ - vault_admin (Vault   │         │
+                                       │   uses to create users)│         │
+                                       └────────────────────────┘         │
+                                                                         │
+   Legend                                                                │
+   ──────                                                                │
+   ───▶  control flow (config / identity)                                │
+   ◀──   data flow (issued credentials)                                  │
 ```
+
+Three independent control planes:
+
+- **Operator-side IaC** (`terraform/`) — declares what Vault should look like;
+  drift detected by `make verify-iac`.
+- **In-cluster identity** — Kubernetes signs the SA JWT; Vault verifies it
+  via TokenReview against the Kubernetes API server.
+- **Database authority** — PostgreSQL enforces its own role grants regardless
+  of what Vault thinks the credential is for.
 
 The Python app never sees a Postgres password until the moment Vault Agent
 writes it to a file inside its own Pod. The password lives for 15 minutes
