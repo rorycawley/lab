@@ -6,6 +6,7 @@ Hands-on learning projects. Each folder is a small, self-contained demo, mostly 
 | --- | --- |
 | [event-sourcing](event-sourcing) | Event sourcing + CQRS with two Postgres databases, Flyway, and a projector. |
 | [grafana-lgtm](grafana-lgtm) | Grafana LGTM stack on Rancher Desktop: FastAPI services plus a browser SPA sending backend logs/traces/metrics, frontend events, Web Vitals, API latency, and UI errors into Loki, Mimir, Tempo, and Grafana dashboards. |
+| [github-harbor-argocd-cicd-poc](github-harbor-argocd-cicd-poc) | Planning-only POC for GitHub Actions CI, GHCR images, Harbor in Hetzner, Helm, and Argo CD GitOps deployment. |
 | [hetzner](hetzner) | Clojure app with Helm charts and monitoring for Hetzner deployment. |
 | [keycloak-oidc](keycloak-oidc) | OIDC Backend-for-Frontend: Python BFF holds tokens server-side, browser gets only an HttpOnly session cookie. |
 | [keycloak-pg](keycloak-pg) | App authenticates to Postgres using a Keycloak-issued JWT via a PG-wire auth proxy. |
